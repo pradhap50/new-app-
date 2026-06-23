@@ -1,0 +1,8 @@
+{
+  "name": "ChemDose Formula",
+  "description": "An offline calculator with 100 customizable slides, formulas, real-time calculations, dark mode, PDF export, backup \u0026 restore, and an admin configuration interface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
