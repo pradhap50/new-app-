@@ -1894,9 +1894,6 @@ class CalculatorViewModel(
                     signInFirebaseAnonymously { success ->
                         if (success) {
                             runFirestoreTest()
-                        } else {
-                            _syncStatus.value = "Error"
-                            _firebaseAuthStatus.value = "Cloud sync unavailable. Using offline mode."
                         }
                     }
                 } else {
@@ -1904,7 +1901,7 @@ class CalculatorViewModel(
                 }
             } else {
                 _firebaseAuthStatus.value = "Disabled/Uninitialized"
-                _syncStatus.value = "Error"
+                _syncStatus.value = "Error: GOOGLE_SERVICES_JSON_ERROR"
                 _firebaseUserUid.value = null
             }
         } else {
@@ -1916,14 +1913,41 @@ class CalculatorViewModel(
 
     fun runFirestoreTest(onComplete: ((Boolean) -> Unit)? = null) {
         val uid = _firebaseUserUid.value
-        FirebaseService.testFirestoreConnection(uid) { testSuccess, message ->
-            if (testSuccess) {
-                _syncStatus.value = "Connected"
-                onComplete?.invoke(true)
-            } else {
-                _syncStatus.value = "Error"
+        val config = _firebaseConfig.value
+        if (config.databaseUrl.isNotEmpty()) {
+            try {
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance(config.databaseUrl)
+                val testRef = database.getReference("users").child(uid ?: "anonymous_guest").child("data").child("connectivity_test")
+                testRef.setValue(java.text.DateFormat.getDateTimeInstance().format(java.util.Date()))
+                    .addOnSuccessListener {
+                        _syncStatus.value = "Online"
+                        retryPendingUserProfiles()
+                        retryPendingUserActivityLogs()
+                        onComplete?.invoke(true)
+                    }
+                    .addOnFailureListener { e ->
+                        _syncStatus.value = "Error: ${e.localizedMessage}"
+                        _firebaseAuthStatus.value = "Cloud sync unavailable. Using offline mode."
+                        onComplete?.invoke(false)
+                    }
+            } catch (e: Exception) {
+                _syncStatus.value = "Error: ${e.localizedMessage}"
                 _firebaseAuthStatus.value = "Cloud sync unavailable. Using offline mode."
                 onComplete?.invoke(false)
+            }
+        } else {
+            FirebaseService.testFirestoreConnection(uid) { testSuccess, message ->
+                if (testSuccess) {
+                    _syncStatus.value = "Online"
+                    // On connection success, retry pending Room queues
+                    retryPendingUserProfiles()
+                    retryPendingUserActivityLogs()
+                    onComplete?.invoke(true)
+                } else {
+                    _syncStatus.value = "Error: $message"
+                    _firebaseAuthStatus.value = "Cloud sync unavailable. Using offline mode."
+                    onComplete?.invoke(false)
+                }
             }
         }
     }
@@ -1941,16 +1965,13 @@ class CalculatorViewModel(
                 signInFirebaseAnonymously { success ->
                     if (success) {
                         runFirestoreTest()
-                    } else {
-                        _syncStatus.value = "Error"
-                        _firebaseAuthStatus.value = "Cloud sync unavailable. Using offline mode."
                     }
                 }
             } else {
                 runFirestoreTest()
             }
         } else {
-            _syncStatus.value = "Error"
+            _syncStatus.value = "Error: GOOGLE_SERVICES_JSON_ERROR"
             _firebaseAuthStatus.value = "Cloud sync unavailable. Using offline mode."
         }
     }
@@ -1965,6 +1986,7 @@ class CalculatorViewModel(
 
     fun signInFirebaseAnonymously(onComplete: ((Boolean) -> Unit)? = null) {
         if (!FirebaseService.isInitialized) {
+            _syncStatus.value = "Error: GOOGLE_SERVICES_JSON_ERROR"
             onComplete?.invoke(false)
             return
         }
@@ -1980,6 +2002,12 @@ class CalculatorViewModel(
                 _firebaseUserUid.value = null
                 _firebaseAuthStatus.value = "Auth Failed ($uid)"
                 logAction("FIREBASE_AUTH_FAILED", "Authentication failed: $uid")
+                val errReason = if (uid?.contains("API key") == true || uid?.contains("invalid") == true) {
+                    "GOOGLE_SERVICES_JSON_ERROR"
+                } else {
+                    "NETWORK_ERROR"
+                }
+                _syncStatus.value = "Error: $errReason"
                 onComplete?.invoke(false)
             }
         }
@@ -2050,18 +2078,36 @@ class CalculatorViewModel(
             return
         }
 
-        FirebaseService.backupFormulasToFirestore(
-            userId = uid,
-            slidesWithVars = allSlides.value,
-            decimalPlaces = decimalPlaces.value
-        ) { success, message ->
-            logAction(if (success) "FIREBASE_BACKUP_SUCCESS" else "FIREBASE_BACKUP_FAILED", message)
-            if (success) {
-                handleBackupSuccess(message)
-            } else {
-                handleBackupFailure(message)
+        val config = _firebaseConfig.value
+        if (config.databaseUrl.isNotEmpty()) {
+            FirebaseService.backupFormulasToRealtimeDatabase(
+                userId = uid,
+                databaseUrl = config.databaseUrl,
+                slidesWithVars = allSlides.value,
+                decimalPlaces = decimalPlaces.value
+            ) { success, message ->
+                logAction(if (success) "FIREBASE_BACKUP_SUCCESS" else "FIREBASE_BACKUP_FAILED", message)
+                if (success) {
+                    handleBackupSuccess(message)
+                } else {
+                    handleBackupFailure(message)
+                }
+                onResult(success, message)
             }
-            onResult(success, message)
+        } else {
+            FirebaseService.backupFormulasToFirestore(
+                userId = uid,
+                slidesWithVars = allSlides.value,
+                decimalPlaces = decimalPlaces.value
+            ) { success, message ->
+                logAction(if (success) "FIREBASE_BACKUP_SUCCESS" else "FIREBASE_BACKUP_FAILED", message)
+                if (success) {
+                    handleBackupSuccess(message)
+                } else {
+                    handleBackupFailure(message)
+                }
+                onResult(success, message)
+            }
         }
     }
 
@@ -2073,7 +2119,9 @@ class CalculatorViewModel(
         }
 
         _firebaseAuthStatus.value = "Restoring data..."
-        FirebaseService.restoreFormulasFromFirestore(uid) { success, networkFormulas, originalDecimalPlaces, message ->
+        
+        val config = _firebaseConfig.value
+        val onRestoreComplete = { success: Boolean, networkFormulas: List<NetworkFormula>?, originalDecimalPlaces: Int?, message: String ->
             if (success && networkFormulas != null) {
                 viewModelScope.launch {
                     try {
@@ -2104,8 +2152,8 @@ class CalculatorViewModel(
                         }
 
                         _firebaseAuthStatus.value = "Authenticated (UID: $uid)"
-                        logAction("FIREBASE_RESTORE_SUCCESS", "Restored ${networkFormulas.size} formulas and configuration parameters from Firestore.")
-                        onResult(true, "Successfully restored ${networkFormulas.size} formulas from Firestore!")
+                        logAction("FIREBASE_RESTORE_SUCCESS", "Restored ${networkFormulas.size} formulas and configuration parameters.")
+                        onResult(true, "Successfully restored ${networkFormulas.size} formulas!")
                     } catch (e: java.lang.Exception) {
                         _firebaseAuthStatus.value = "Restore Failed"
                         onResult(false, "Failed to write database: ${e.localizedMessage}")
@@ -2115,6 +2163,13 @@ class CalculatorViewModel(
                 _firebaseAuthStatus.value = "Authenticated (UID: $uid)"
                 onResult(false, message)
             }
+            Unit
+        }
+
+        if (config.databaseUrl.isNotEmpty()) {
+            FirebaseService.restoreFormulasFromRealtimeDatabase(uid, config.databaseUrl, onRestoreComplete)
+        } else {
+            FirebaseService.restoreFormulasFromFirestore(uid, onRestoreComplete)
         }
     }
 
@@ -2123,12 +2178,23 @@ class CalculatorViewModel(
         val uid = _firebaseUserUid.value
         if (config.isEnabled && config.autoSync && uid != null) {
             _lastBackupStatus.value = "Auto-syncing..."
-            FirebaseService.backupFormulasToFirestore(uid, allSlides.value, decimalPlaces.value) { success, msg ->
-                android.util.Log.d("AutoSync", "Offline-Sync Status: success=$success msg=$msg")
-                if (success) {
-                    handleBackupSuccess("Auto-sync completed")
-                } else {
-                    handleBackupFailure(msg)
+            if (config.databaseUrl.isNotEmpty()) {
+                FirebaseService.backupFormulasToRealtimeDatabase(uid, config.databaseUrl, allSlides.value, decimalPlaces.value) { success, msg ->
+                    android.util.Log.d("AutoSync", "Offline-Sync Status: success=$success msg=$msg")
+                    if (success) {
+                        handleBackupSuccess("Auto-sync completed")
+                    } else {
+                        handleBackupFailure(msg)
+                    }
+                }
+            } else {
+                FirebaseService.backupFormulasToFirestore(uid, allSlides.value, decimalPlaces.value) { success, msg ->
+                    android.util.Log.d("AutoSync", "Offline-Sync Status: success=$success msg=$msg")
+                    if (success) {
+                        handleBackupSuccess("Auto-sync completed")
+                    } else {
+                        handleBackupFailure(msg)
+                    }
                 }
             }
         }
@@ -2136,8 +2202,13 @@ class CalculatorViewModel(
 
     fun logCurrentCalculationToFirestore(slideTitle: String, formula: String, inputs: String, result: String) {
         val uid = _firebaseUserUid.value
+        val config = _firebaseConfig.value
         if (uid != null) {
-            FirebaseService.saveCalculationHistory(uid, slideTitle, formula, inputs, result)
+            if (config.databaseUrl.isNotEmpty()) {
+                FirebaseService.saveCalculationHistoryToRealtimeDatabase(uid, config.databaseUrl, slideTitle, formula, inputs, result)
+            } else {
+                FirebaseService.saveCalculationHistory(uid, slideTitle, formula, inputs, result)
+            }
         }
     }
 
@@ -2146,6 +2217,10 @@ class CalculatorViewModel(
         sp.edit()
             .putBoolean("enabled", config.isEnabled)
             .putBoolean("auto_sync", config.autoSync)
+            .putString("api_key", config.apiKey)
+            .putString("application_id", config.applicationId)
+            .putString("project_id", config.projectId)
+            .putString("database_url", config.databaseUrl)
             .apply()
     }
 
@@ -2153,8 +2228,12 @@ class CalculatorViewModel(
         val sp = getApplication<Application>().getSharedPreferences("firebase_prefs", Context.MODE_PRIVATE)
         _lastBackupTime.value = sp.getString("last_backup_time", "Never") ?: "Never"
         val config = FirebaseConfig(
-            isEnabled = sp.getBoolean("enabled", false),
-            autoSync = sp.getBoolean("auto_sync", false)
+            isEnabled = sp.getBoolean("enabled", true),
+            autoSync = sp.getBoolean("auto_sync", true),
+            apiKey = sp.getString("api_key", "") ?: "",
+            applicationId = sp.getString("application_id", "") ?: "",
+            projectId = sp.getString("project_id", "") ?: "",
+            databaseUrl = sp.getString("database_url", "") ?: ""
         )
         _firebaseConfig.value = config
         if (config.isEnabled) {
@@ -2167,16 +2246,13 @@ class CalculatorViewModel(
                     signInFirebaseAnonymously { success ->
                         if (success) {
                             runFirestoreTest()
-                        } else {
-                            _syncStatus.value = "Error"
-                            _firebaseAuthStatus.value = "Cloud sync unavailable. Using offline mode."
                         }
                     }
                 } else {
                     runFirestoreTest()
                 }
             } else {
-                _syncStatus.value = "Error"
+                _syncStatus.value = "Error: GOOGLE_SERVICES_JSON_ERROR"
                 _firebaseAuthStatus.value = "Cloud sync unavailable. Using offline mode."
             }
         } else {

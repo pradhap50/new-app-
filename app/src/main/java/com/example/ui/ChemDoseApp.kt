@@ -2413,7 +2413,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                         ) {
                                             Text("Sync Status:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f))
                                             val statusColor = when (syncStatus) {
-                                                "Connected" -> Color(0xFF22C55E)
+                                                "Connected", "Online" -> Color(0xFF22C55E)
                                                 "Offline" -> Color.Gray
                                                 "Connecting..." -> Color(0xFFEAB308)
                                                 else -> Color(0xFFEF4444)
@@ -3922,7 +3922,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                  ) {
                                                      Text("Sync Status:", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color(0xFF0F172A))
                                                      val statusColor = when (syncStatus) {
-                                                         "Connected" -> Color(0xFF22C55E)
+                                                         "Connected", "Online" -> Color(0xFF22C55E)
                                                          "Offline" -> Color.Gray
                                                          "Connecting..." -> Color(0xFFEAB308)
                                                          else -> Color(0xFFEF4444)
@@ -4572,6 +4572,110 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                             }
                                         }
                                     }
+
+                                    NeumorphicCard(
+                                         modifier = Modifier.fillMaxWidth(),
+                                         cornerRadius = 16.dp
+                                     ) {
+                                         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                             var showAdvancedSettings by remember { mutableStateOf(false) }
+                                             var apiKeyInput by remember(firebaseConfig) { mutableStateOf(firebaseConfig.apiKey) }
+                                             var appIdInput by remember(firebaseConfig) { mutableStateOf(firebaseConfig.applicationId) }
+                                             var projectIdInput by remember(firebaseConfig) { mutableStateOf(firebaseConfig.projectId) }
+                                             var dbUrlInput by remember(firebaseConfig) { mutableStateOf(firebaseConfig.databaseUrl) }
+
+                                             Column(modifier = Modifier.fillMaxWidth()) {
+                                                 Row(
+                                                     modifier = Modifier
+                                                         .fillMaxWidth()
+                                                         .clip(RoundedCornerShape(8.dp))
+                                                         .clickable { showAdvancedSettings = !showAdvancedSettings }
+                                                         .padding(vertical = 8.dp, horizontal = 4.dp),
+                                                     verticalAlignment = Alignment.CenterVertically,
+                                                     horizontalArrangement = Arrangement.SpaceBetween
+                                                 ) {
+                                                     Row(verticalAlignment = Alignment.CenterVertically) {
+                                                         Icon(
+                                                             imageVector = Icons.Default.Settings,
+                                                             contentDescription = null,
+                                                             tint = Color(0xFF475569),
+                                                             modifier = Modifier.size(20.dp)
+                                                         )
+                                                         Spacer(modifier = Modifier.width(8.dp))
+                                                         Text(
+                                                             text = "Advanced Firebase Credentials",
+                                                             fontSize = 16.sp,
+                                                             fontWeight = FontWeight.Bold,
+                                                             color = Color(0xFF475569)
+                                                         )
+                                                     }
+                                                     Icon(
+                                                         imageVector = if (showAdvancedSettings) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                                         contentDescription = null,
+                                                         tint = Color(0xFF475569)
+                                                     )
+                                                 }
+
+                                                 if (showAdvancedSettings) {
+                                                     Column(
+                                                         modifier = Modifier
+                                                             .fillMaxWidth()
+                                                             .padding(top = 8.dp, bottom = 12.dp),
+                                                         verticalArrangement = Arrangement.spacedBy(12.dp)
+                                                     ) {
+                                                         OutlinedTextField(
+                                                             value = apiKeyInput,
+                                                             onValueChange = { apiKeyInput = it },
+                                                             label = { Text("API Key", fontSize = 14.sp) },
+                                                             modifier = Modifier.fillMaxWidth().testTag("firebase_api_key_field"),
+                                                             singleLine = true
+                                                         )
+                                                         OutlinedTextField(
+                                                             value = appIdInput,
+                                                             onValueChange = { appIdInput = it },
+                                                             label = { Text("Application ID (App ID)", fontSize = 14.sp) },
+                                                             modifier = Modifier.fillMaxWidth().testTag("firebase_app_id_field"),
+                                                             singleLine = true
+                                                         )
+                                                         OutlinedTextField(
+                                                             value = projectIdInput,
+                                                             onValueChange = { projectIdInput = it },
+                                                             label = { Text("Project ID", fontSize = 14.sp) },
+                                                             modifier = Modifier.fillMaxWidth().testTag("firebase_project_id_field"),
+                                                             singleLine = true
+                                                         )
+                                                         OutlinedTextField(
+                                                             value = dbUrlInput,
+                                                             onValueChange = { dbUrlInput = it },
+                                                             label = { Text("Realtime Database URL (Optional)", fontSize = 14.sp) },
+                                                             placeholder = { Text("https://your-db.firebaseio.com", fontSize = 14.sp) },
+                                                             modifier = Modifier.fillMaxWidth().testTag("firebase_db_url_field"),
+                                                             singleLine = true
+                                                         )
+
+                                                         NeumorphicButton(
+                                                             onClick = {
+                                                                 val updatedConfig = firebaseConfig.copy(
+                                                                     apiKey = apiKeyInput.trim(),
+                                                                     applicationId = appIdInput.trim(),
+                                                                     projectId = projectIdInput.trim(),
+                                                                     databaseUrl = dbUrlInput.trim()
+                                                                 )
+                                                                 viewModel.updateFirebaseConfig(updatedConfig)
+                                                                 Toast.makeText(context, "Firebase credentials applied!", Toast.LENGTH_SHORT).show()
+                                                             },
+                                                             cornerRadius = 10.dp,
+                                                             modifier = Modifier.fillMaxWidth().height(48.dp).testTag("save_firebase_config_button")
+                                                         ) {
+                                                             Text("Apply & Reload Firebase", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                         }
+                                                     }
+                                                 }
+                                             }
+                                         }
+                                     }
+
+                                     Spacer(modifier = Modifier.height(14.dp))
 
                                     // JSON EXPORTER & SANDBOX BLUEPRINT
                                     Spacer(modifier = Modifier.height(6.dp))
@@ -7894,9 +7998,16 @@ fun LoginSelectionScreen(viewModel: CalculatorViewModel) {
 
     var selectedMode by remember { mutableStateOf("user_login") } // "user_login", "user_signup", "admin_login", "forgot"
 
+    val rememberPrefs = remember { context.getSharedPreferences("remember_prefs", android.content.Context.MODE_PRIVATE) }
+    var rememberPassword by remember { mutableStateOf(rememberPrefs.getBoolean("remember_password", false)) }
+
     // Form inputs state
-    var emailOrUserIn by remember { mutableStateOf("") }
-    var userPassIn by remember { mutableStateOf("") }
+    var emailOrUserIn by remember {
+        mutableStateOf(if (rememberPrefs.getBoolean("remember_password", false)) rememberPrefs.getString("saved_email_or_user", "") ?: "" else "")
+    }
+    var userPassIn by remember {
+        mutableStateOf(if (rememberPrefs.getBoolean("remember_password", false)) rememberPrefs.getString("saved_password", "") ?: "" else "")
+    }
 
     var signUpName by remember { mutableStateOf("") }
     var signUpEmail by remember { mutableStateOf("") }
@@ -8043,6 +8154,25 @@ fun LoginSelectionScreen(viewModel: CalculatorViewModel) {
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp)
                             )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { rememberPassword = !rememberPassword }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = rememberPassword,
+                                    onCheckedChange = { rememberPassword = it },
+                                    modifier = Modifier.testTag("remember_password_checkbox")
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Remember Password",
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                )
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
                             Button(
                                 onClick = {
@@ -8051,6 +8181,17 @@ fun LoginSelectionScreen(viewModel: CalculatorViewModel) {
                                         return@Button
                                     }
                                     viewModel.signInWithCredentials(emailOrUserIn.trim(), userPassIn) { success, msg ->
+                                        if (success) {
+                                            if (rememberPassword) {
+                                                rememberPrefs.edit()
+                                                    .putBoolean("remember_password", true)
+                                                    .putString("saved_email_or_user", emailOrUserIn.trim())
+                                                    .putString("saved_password", userPassIn)
+                                                    .apply()
+                                            } else {
+                                                rememberPrefs.edit().clear().apply()
+                                            }
+                                        }
                                         Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                     }
                                 },
