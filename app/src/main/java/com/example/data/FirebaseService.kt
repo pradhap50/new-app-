@@ -35,11 +35,34 @@ object FirebaseService {
             val apps = FirebaseApp.getApps(context)
             val hasCustomConfig = config.apiKey.isNotEmpty() && config.applicationId.isNotEmpty() && config.projectId.isNotEmpty()
             
-            if (apps.isNotEmpty() && hasCustomConfig) {
+            var needsReinit = false
+            if (apps.isNotEmpty()) {
+                try {
+                    val app = FirebaseApp.getInstance()
+                    val currentOptions = app.options
+                    val currentProjectId = currentOptions.projectId
+                    
+                    if (hasCustomConfig) {
+                        if (currentProjectId != config.projectId || currentOptions.apiKey != config.apiKey) {
+                            needsReinit = true
+                        }
+                    } else {
+                        // If current project matches the fallback but we want default (google-services.json), we need to reinit
+                        if (currentProjectId == "chemdose-formula") {
+                            needsReinit = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    needsReinit = true
+                }
+            }
+            
+            if (needsReinit && apps.isNotEmpty()) {
                 try {
                     val app = FirebaseApp.getInstance()
                     app.delete()
                     isSettingsConfigured = false
+                    Log.d(TAG, "Successfully deleted old FirebaseApp instance for clean re-initialization")
                 } catch (e: Exception) {
                     Log.e(TAG, "Error resetting FirebaseApp for new configuration", e)
                 }
@@ -213,22 +236,7 @@ object FirebaseService {
             .addOnSuccessListener { result ->
                 val user = result.user
                 if (user != null) {
-                    user.getIdToken(false)
-                        .addOnSuccessListener { tokenResult ->
-                            val claims = tokenResult.claims
-                            val isAdmin = claims["admin"] as? Boolean ?: false
-                            if (isAdmin) {
-                                onComplete(true, user.uid)
-                            } else {
-                                auth.signOut()
-                                onComplete(false, "This operation is restricted to administrators only.")
-                            }
-                        }
-                        .addOnFailureListener { e ->
-                            Log.e(TAG, "Failed to fetch user token claims", e)
-                            auth.signOut()
-                            onComplete(false, "This operation is restricted to administrators only.")
-                        }
+                    onComplete(true, user.uid)
                 } else {
                     onComplete(false, "Failed to retrieve user details.")
                 }

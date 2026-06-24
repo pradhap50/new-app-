@@ -41,6 +41,21 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -1734,20 +1749,18 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                         }
                                         Spacer(modifier = Modifier.height(8.dp))
 
-                                        LazyColumn(
-                                            verticalArrangement = Arrangement.spacedBy(8.dp), userScrollEnabled = false,
-                                            modifier = Modifier.weight(1f)
+                                        Column(
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             if (displayedVariables.isEmpty()) {
-                                                item {
+
                                                     Text(
                                                         text = if (isAdminMode) "No parameters configured." else "No visible parameters for this template.",
                                                         fontSize = 12.sp,
                                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                                                     )
-                                                }
                                             } else {
-                                                item { displayedVariables.forEachIndexed { index, variable ->
+                                                displayedVariables.forEachIndexed { index, variable ->
                                                     VariableInputRow(
                                                         variable = variable,
                                                         isAdmin = isAdminMode,
@@ -1790,7 +1803,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                             }
                                                         } else null
                                                     )
-                                                } }
+                                                }
                                             }
                                         }
                                     }
@@ -4101,12 +4114,8 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
 
                                                 NeumorphicButton(
                                                     onClick = {
-                                                        if (isAdminMode) {
-                                                            viewModel.syncNow { finalReport ->
-                                                                Toast.makeText(context, finalReport.message, Toast.LENGTH_LONG).show()
-                                                            }
-                                                        } else {
-                                                            Toast.makeText(context, "Sync is restricted to Admin users. Please activate Admin mode.", Toast.LENGTH_LONG).show()
+                                                        viewModel.syncNow { finalReport ->
+                                                            Toast.makeText(context, finalReport.message, Toast.LENGTH_LONG).show()
                                                         }
                                                     },
                                                     enabled = !isSyncing,
@@ -5288,7 +5297,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                 }
 
                                 Text(
-                                    text = if (isAdminMode) "✓ Admin privileges verified! You are authorized to sync, edit, add, and fully modify formulas." else "⚠ Read-Only Active. Operators can run full offline calculations, but only Admin credentials can trigger central database uploads / sync overrides.",
+                                    text = if (isAdminMode) "✓ Admin privileges verified! You are authorized to sync, edit, add, and fully modify formulas." else "✓ Cloud synchronization is enabled! Both operators and administrators can trigger central database uploads.",
                                     fontSize = 9.sp,
                                     lineHeight = 11.sp,
                                     color = if (isAdminMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -5320,20 +5329,16 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                     }
                                 }
 
-                                // 6. Trigger Sync Button (Restricted to Admin Mode)
+                                // 6. Trigger Sync Button (Both Admin & operator can sync)
                                 NeumorphicButton(
                                     onClick = {
-                                        if (isAdminMode) {
-                                            viewModel.syncNow { finalReport ->
-                                                Toast.makeText(context, finalReport.message, Toast.LENGTH_LONG).show()
-                                            }
-                                        } else {
-                                            Toast.makeText(context, "Privileges Denied. Standard operators cannot sync. Toggle Session to Admin above first.", Toast.LENGTH_LONG).show()
+                                        viewModel.syncNow { finalReport ->
+                                            Toast.makeText(context, finalReport.message, Toast.LENGTH_LONG).show()
                                         }
                                     },
                                     modifier = Modifier.fillMaxWidth().height(42.dp).testTag("sync_now_button"),
-                                    containerColor = if (isAdminMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = if (isAdminMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
                                     enabled = !isSyncing,
                                     cornerRadius = 12.dp
                                 ) {
@@ -5349,7 +5354,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                         Icon(Icons.Default.Refresh, contentDescription = "Sync", modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = if (isAdminMode) "SYNC NOW WITH WEBSITE CENTRAL DATABASE" else "SYNC NOW (ADMIN ONLY)",
+                                            text = "SYNC NOW WITH WEBSITE CENTRAL DATABASE",
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -6681,7 +6686,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                             singleLine = true
                                         )
 
-                                        LazyColumn(
+                                        LazyColumn( // settings
                                             modifier = Modifier.weight(1f),
                                             verticalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
@@ -8020,10 +8025,84 @@ fun LoginSelectionScreen(viewModel: CalculatorViewModel) {
     var forgotEmail by remember { mutableStateOf("") }
     var forgotRoleSearch by remember { mutableStateOf("password") } // "password", "userId"
 
+    val infiniteTransition = rememberInfiniteTransition(label = "cyber_bg")
+    val animPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2f * Math.PI.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(15000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "anim_phase"
+    )
+
+    val particles = remember {
+        List(25) {
+            Triple(
+                Math.random().toFloat(),
+                Math.random().toFloat(),
+                (1.5 + Math.random() * 3.5).toFloat()
+            )
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0B0018),
+                        Color(0xFF140028),
+                        Color(0xFF220044)
+                    )
+                )
+            )
+            .drawBehind {
+                // Draw futuristic star particles
+                particles.forEachIndexed { index, (xRatio, yRatio, radius) ->
+                    val alpha = 0.2f + 0.4f * kotlin.math.sin(animPhase + index * 1.2f)
+                    val animatedY = (yRatio + 0.04f * kotlin.math.sin(animPhase * 0.4f + index)).coerceIn(0f, 1f)
+                    drawCircle(
+                        color = Color(0xFFC084FC).copy(alpha = alpha.coerceIn(0f, 1f)),
+                        radius = radius.dp.toPx(),
+                        center = Offset(xRatio * size.width, animatedY * size.height)
+                    )
+                }
+
+                // Draw abstract glowing wave curves
+                val wavePath = Path()
+                val waveY = size.height * 0.75f
+                wavePath.moveTo(0f, waveY)
+                wavePath.cubicTo(
+                    size.width * 0.3f, waveY - 100f * kotlin.math.sin(animPhase),
+                    size.width * 0.7f, waveY + 100f * kotlin.math.cos(animPhase),
+                    size.width, waveY
+                )
+                wavePath.lineTo(size.width, size.height)
+                wavePath.lineTo(0f, size.height)
+                wavePath.close()
+                drawPath(
+                    path = wavePath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(Color(0x228B5CF6), Color(0x050B0018))
+                    )
+                )
+
+                val linePath = Path()
+                val lineY = size.height * 0.25f
+                linePath.moveTo(0f, lineY)
+                linePath.cubicTo(
+                    size.width * 0.35f, lineY + 120f * kotlin.math.cos(animPhase),
+                    size.width * 0.65f, lineY - 120f * kotlin.math.sin(animPhase),
+                    size.width, lineY
+                )
+                drawPath(
+                    path = linePath,
+                    color = Color(0x22EC4899),
+                    style = Stroke(width = 2.dp.toPx())
+                )
+            }
             .testTag("login_selection_container"),
         contentAlignment = Alignment.Center
     ) {
@@ -8031,50 +8110,64 @@ fun LoginSelectionScreen(viewModel: CalculatorViewModel) {
             modifier = Modifier
                 .widthIn(max = 480.dp)
                 .fillMaxWidth()
+                .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header Logo
+            // Header Logo Wrapper with custom cybernetic glowing ring
             Box(
                 modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF3B82F6),
-                                Color(0xFF10B981)
-                            )
+                    .size(72.dp)
+                    .drawBehind {
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(Color(0xFFC084FC).copy(alpha = 0.4f), Color.Transparent)
+                            ),
+                            radius = 48.dp.toPx()
                         )
-                    ),
+                    }
+                    .border(1.5.dp, Color(0x66A78BFA), CircleShape)
+                    .background(Color(0x26C084FC), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "🏭",
-                    fontSize = 32.sp
+                Icon(
+                    imageVector = Icons.Default.Shield,
+                    contentDescription = "Shield Logo",
+                    tint = Color(0xFFE9D5FF),
+                    modifier = Modifier.size(34.dp)
                 )
             }
-            Spacer(modifier = Modifier.height(12.dp))
+
+            // Beautiful gradient White-Purple title text
             Text(
-                text = "ChemDose Formula Control",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.onBackground
+                text = "ChemDose Control",
+                style = TextStyle(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color.White, Color(0xFFC084FC), Color(0xFFF472B6))
+                    ),
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    textAlign = TextAlign.Center
+                )
             )
+
             Text(
                 text = "Secure Chemical Operator Portal System",
                 fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xCCFFFFFF),
+                textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Selector Tabs (Material 3 Pill Selector Row)
+            // Sleek glass segmented tab switcher
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 4.dp)
+                    .background(Color(0x0DFFFFFF), RoundedCornerShape(16.dp))
+                    .border(BorderStroke(1.dp, Color(0x1EFFFFFF)), RoundedCornerShape(16.dp))
+                    .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 val modes = listOf(
@@ -8085,382 +8178,672 @@ fun LoginSelectionScreen(viewModel: CalculatorViewModel) {
                 )
                 modes.forEach { (mode, label) ->
                     val isSelected = selectedMode == mode
-                    Button(
-                        onClick = { selectedMode = mode },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                        ),
+                    Box(
                         modifier = Modifier
                             .weight(1f)
-                            .height(42.dp)
+                            .height(38.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .then(
+                                if (isSelected) {
+                                    Modifier.background(
+                                        Brush.linearGradient(
+                                            colors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
+                                        )
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .clickable { selectedMode = mode }
                             .testTag("tab_$mode"),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 2.dp)
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = label,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) Color.White else Color(0xCCFFFFFF)
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Main Credentials Card
-            NeumorphicCard(
-                modifier = Modifier.fillMaxWidth(),
-                cornerRadius = 20.dp
+            // Glassmorphic credentials card with neon border
+            GlassmorphicCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
             ) {
                 Column(
-                    modifier = Modifier
-                        .padding(18.dp)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     when (selectedMode) {
-                        "user_login" -> {
-                            Text(
-                                text = "Operator Login",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                "Enter your Email or custom User ID to access the Chemical Operator Console:",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                            )
-                            OutlinedTextField(
-                                value = emailOrUserIn,
-                                onValueChange = { emailOrUserIn = it },
-                                label = { Text("Email or User ID", fontSize = 14.sp) },
-                                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .testTag("login_user_email_input"),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            OutlinedTextField(
-                                value = userPassIn,
-                                onValueChange = { userPassIn = it },
-                                label = { Text("Password", fontSize = 14.sp) },
-                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .testTag("login_user_password_input"),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { rememberPassword = !rememberPassword }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = rememberPassword,
-                                    onCheckedChange = { rememberPassword = it },
-                                    modifier = Modifier.testTag("remember_password_checkbox")
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                            "user_login" -> {
                                 Text(
-                                    text = "Remember Password",
-                                    fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                    text = "Welcome Back",
+                                    style = TextStyle(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(Color.White, Color(0xFFC084FC))
+                                        ),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Button(
-                                onClick = {
-                                    if (emailOrUserIn.isBlank() || userPassIn.isBlank()) {
-                                        Toast.makeText(context, "Please enter all credential fields", Toast.LENGTH_SHORT).show()
-                                        return@Button
+                                Text(
+                                    text = "Sign in to continue to your account",
+                                    fontSize = 13.sp,
+                                    color = Color(0xB3FFFFFF),
+                                    textAlign = TextAlign.Center
+                                )
+
+                                CyberGlassTextField(
+                                    value = emailOrUserIn,
+                                    onValueChange = { emailOrUserIn = it },
+                                    label = "Email or User ID",
+                                    placeholder = "Email or Custom ID",
+                                    leadingIcon = Icons.Default.Person,
+                                    testTag = "login_user_email_input"
+                                )
+
+                                CyberGlassTextField(
+                                    value = userPassIn,
+                                    onValueChange = { userPassIn = it },
+                                    label = "Password",
+                                    placeholder = "Enter Password",
+                                    leadingIcon = Icons.Default.Lock,
+                                    testTag = "login_user_password_input",
+                                    isPassword = true
+                                )
+
+                                // Options Row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clickable { rememberPassword = !rememberPassword }
+                                            .padding(vertical = 4.dp)
+                                    ) {
+                                        Checkbox(
+                                            checked = rememberPassword,
+                                            onCheckedChange = { rememberPassword = it },
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = Color(0xFF8B5CF6),
+                                                uncheckedColor = Color(0x66FFFFFF),
+                                                checkmarkColor = Color.White
+                                            ),
+                                            modifier = Modifier.testTag("remember_password_checkbox")
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Remember me",
+                                            fontSize = 13.sp,
+                                            color = Color(0xCCFFFFFF)
+                                        )
                                     }
-                                    viewModel.signInWithCredentials(emailOrUserIn.trim(), userPassIn) { success, msg ->
-                                        if (success) {
-                                            if (rememberPassword) {
-                                                rememberPrefs.edit()
-                                                    .putBoolean("remember_password", true)
-                                                    .putString("saved_email_or_user", emailOrUserIn.trim())
-                                                    .putString("saved_password", userPassIn)
-                                                    .apply()
-                                            } else {
-                                                rememberPrefs.edit().clear().apply()
-                                            }
+
+                                    Text(
+                                        text = "Forgot Password?",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFC084FC),
+                                        modifier = Modifier
+                                            .clickable { selectedMode = "forgot" }
+                                            .padding(vertical = 4.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                CyberGradientButton(
+                                    text = "Log In to Console",
+                                    isLoading = isAuthenticating,
+                                    testTag = "login_submit_btn",
+                                    onClick = {
+                                        if (emailOrUserIn.isBlank() || userPassIn.isBlank()) {
+                                            Toast.makeText(context, "Please enter all credential fields", Toast.LENGTH_SHORT).show()
+                                            return@CyberGradientButton
                                         }
-                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        viewModel.signInWithCredentials(emailOrUserIn.trim(), userPassIn) { success, msg ->
+                                            if (success) {
+                                                if (rememberPassword) {
+                                                    rememberPrefs.edit()
+                                                        .putBoolean("remember_password", true)
+                                                        .putString("saved_email_or_user", emailOrUserIn.trim())
+                                                        .putString("saved_password", userPassIn)
+                                                        .apply()
+                                                } else {
+                                                    rememberPrefs.edit().clear().apply()
+                                                }
+                                            }
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        }
                                     }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .testTag("login_submit_btn"),
-                                enabled = !isAuthenticating,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                if (isAuthenticating) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp).testTag("login_spinner"), color = MaterialTheme.colorScheme.onPrimary)
-                                } else {
-                                    Text("Log In to Console", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                        "user_signup" -> {
-                            Text(
-                                text = "Create Operator Account",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                "Register profile parameters below. New registers default to safe 'operator' roles.",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                            )
-                            OutlinedTextField(
-                                value = signUpEmail,
-                                onValueChange = { signUpEmail = it },
-                                label = { Text("Email Address", fontSize = 14.sp) },
-                                leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .testTag("signup_email_input"),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            OutlinedTextField(
-                                value = signUpPass,
-                                onValueChange = { signUpPass = it },
-                                label = { Text("Secret Password", fontSize = 14.sp) },
-                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .testTag("signup_password_input"),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            OutlinedTextField(
-                                value = signUpConfirmPass,
-                                onValueChange = { signUpConfirmPass = it },
-                                label = { Text("Confirm Password", fontSize = 14.sp) },
-                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .testTag("signup_confirm_password_input"),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Button(
-                                onClick = {
-                                    if (signUpEmail.isBlank() || signUpPass.isBlank() || signUpConfirmPass.isBlank()) {
-                                        Toast.makeText(context, "Please complete all registration parameters", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    if (!android.util.Patterns.EMAIL_ADDRESS.matcher(signUpEmail.trim()).matches()) {
-                                        Toast.makeText(context, "Invalid email address format.", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    if (signUpPass.length < 6) {
-                                        Toast.makeText(context, "Password must be at least 6 characters.", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    if (signUpPass != signUpConfirmPass) {
-                                        Toast.makeText(context, "Passwords do not match.", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    viewModel.signUpUser(signUpEmail.trim(), signUpPass, signUpConfirmPass) { success, msg ->
-                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .testTag("signup_submit_btn"),
-                                enabled = !isAuthenticating,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                if (isAuthenticating) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp).testTag("login_spinner"), color = MaterialTheme.colorScheme.onPrimary)
-                                } else {
-                                    Text("Register Console Profile", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                        "admin_login" -> {
-                            Text(
-                                text = "System Administrator Sign-On",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                            Text(
-                                "Enter master Administrator console passcode. Master admin accounts are restricted access.",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                            )
-                            OutlinedTextField(
-                                value = adminPassIn,
-                                onValueChange = { adminPassIn = it },
-                                label = { Text("Admin Passcode", fontSize = 14.sp) },
-                                leadingIcon = { Icon(Icons.Default.VpnKey, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                visualTransformation = PasswordVisualTransformation(),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .testTag("admin_password_input"),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Button(
-                                onClick = {
-                                    if (adminPassIn.isBlank()) {
-                                        Toast.makeText(context, "Please enter admin passcode", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    viewModel.loginAsAdminWithPassword(adminPassIn) { success, msg ->
-                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .testTag("admin_submit_btn"),
-                                enabled = !isAuthenticating,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                if (isAuthenticating) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp).testTag("login_spinner"), color = MaterialTheme.colorScheme.onPrimary)
-                                } else {
-                                    Text("Authenticate Admin Rights", fontWeight = FontWeight.Bold, color = Color.White)
-                                }
-                            }
-                        }
-                        "forgot" -> {
-                            Text(
-                                text = "Forgot Credentials Link",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                "Lookup User ID or trigger password resets to registered emails:",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                            )
-                            
-                            // Segmented Option Toggle
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                                    .padding(4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                val isResetSel = forgotRoleSearch == "password"
-                                Button(
-                                    onClick = { forgotRoleSearch = "password" },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (isResetSel) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                        contentColor = if (isResetSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f).height(36.dp).testTag("forgot_choice_password"),
-                                    contentPadding = PaddingValues(0.dp)
+                                )
+
+                                Row(
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Reset Password", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                                Button(
-                                    onClick = { forgotRoleSearch = "id" },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (!isResetSel) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                        contentColor = if (!isResetSel) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f).height(36.dp).testTag("forgot_choice_id"),
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Text("Find User ID", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Don't have an account? ", color = Color(0xB3FFFFFF), fontSize = 13.sp)
+                                    Text(
+                                        text = "Sign Up",
+                                        color = Color(0xFFEC4899),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.clickable { selectedMode = "user_signup" }
+                                    )
                                 }
                             }
 
-                            OutlinedTextField(
-                                value = forgotEmail,
-                                onValueChange = { forgotEmail = it },
-                                label = { Text("Registered Email Address") },
-                                leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp)
-                                    .testTag("forgot_email_input"),
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Button(
-                                onClick = {
-                                    if (forgotEmail.isBlank() || !forgotEmail.contains("@")) {
-                                        Toast.makeText(context, "Please enter a valid email address layout.", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    if (forgotRoleSearch == "password") {
-                                        viewModel.sendPasswordReset(forgotEmail.trim()) { success, msg ->
+                            "user_signup" -> {
+                                Text(
+                                    text = "Create Operator Account",
+                                    style = TextStyle(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(Color.White, Color(0xFFC084FC))
+                                        ),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                                Text(
+                                    text = "Register profile parameters. New registers default to 'operator' roles.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xB3FFFFFF),
+                                    textAlign = TextAlign.Center
+                                )
+
+                                CyberGlassTextField(
+                                    value = signUpEmail,
+                                    onValueChange = { signUpEmail = it },
+                                    label = "Email Address",
+                                    placeholder = "operator@chemdose.com",
+                                    leadingIcon = Icons.Default.Email,
+                                    testTag = "signup_email_input"
+                                )
+
+                                CyberGlassTextField(
+                                    value = signUpPass,
+                                    onValueChange = { signUpPass = it },
+                                    label = "Secret Password",
+                                    placeholder = "At least 6 characters",
+                                    leadingIcon = Icons.Default.Lock,
+                                    testTag = "signup_password_input",
+                                    isPassword = true
+                                )
+
+                                CyberGlassTextField(
+                                    value = signUpConfirmPass,
+                                    onValueChange = { signUpConfirmPass = it },
+                                    label = "Confirm Password",
+                                    placeholder = "Confirm Password",
+                                    leadingIcon = Icons.Default.Lock,
+                                    testTag = "signup_confirm_password_input",
+                                    isPassword = true
+                                )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                CyberGradientButton(
+                                    text = "Register Console Profile",
+                                    isLoading = isAuthenticating,
+                                    testTag = "signup_submit_btn",
+                                    onClick = {
+                                        if (signUpEmail.isBlank() || signUpPass.isBlank() || signUpConfirmPass.isBlank()) {
+                                            Toast.makeText(context, "Please complete all registration parameters", Toast.LENGTH_SHORT).show()
+                                            return@CyberGradientButton
+                                        }
+                                        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(signUpEmail.trim()).matches()) {
+                                            Toast.makeText(context, "Invalid email address format.", Toast.LENGTH_SHORT).show()
+                                            return@CyberGradientButton
+                                        }
+                                        if (signUpPass.length < 6) {
+                                            Toast.makeText(context, "Password must be at least 6 characters.", Toast.LENGTH_SHORT).show()
+                                            return@CyberGradientButton
+                                        }
+                                        if (signUpPass != signUpConfirmPass) {
+                                            Toast.makeText(context, "Passwords do not match.", Toast.LENGTH_SHORT).show()
+                                            return@CyberGradientButton
+                                        }
+                                        viewModel.signUpUser(signUpEmail.trim(), signUpPass, signUpConfirmPass) { success, msg ->
                                             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                         }
-                                    } else {
-                                        viewModel.lookupUserId(forgotEmail.trim()) { success, msg ->
-                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
+                                )
+
+                                Row(
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Already have an account? ", color = Color(0xB3FFFFFF), fontSize = 13.sp)
+                                    Text(
+                                        text = "Login",
+                                        color = Color(0xFFEC4899),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        modifier = Modifier.clickable { selectedMode = "user_login" }
+                                    )
+                                }
+                            }
+
+                            "admin_login" -> {
+                                Text(
+                                    text = "Administrator Sign-On",
+                                    style = TextStyle(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(Color.White, Color(0xFFFCA5A5))
+                                        ),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                                Text(
+                                    text = "Enter master Administrator console passcode. Master admin accounts are restricted access.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xB3FFFFFF),
+                                    textAlign = TextAlign.Center
+                                )
+
+                                CyberGlassTextField(
+                                    value = adminPassIn,
+                                    onValueChange = { adminPassIn = it },
+                                    label = "Admin Passcode",
+                                    placeholder = "Enter Passcode",
+                                    leadingIcon = Icons.Default.VpnKey,
+                                    testTag = "admin_password_input",
+                                    isPassword = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
+                                )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                CyberGradientButton(
+                                    text = "Authenticate Admin Rights",
+                                    isLoading = isAuthenticating,
+                                    testTag = "admin_submit_btn",
+                                    onClick = {
+                                        if (adminPassIn.isBlank()) {
+                                            Toast.makeText(context, "Please enter admin passcode", Toast.LENGTH_SHORT).show()
+                                            return@CyberGradientButton
+                                        }
+                                        viewModel.loginAsAdminWithPassword(adminPassIn) { success, msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                         }
                                     }
-                                },
+                                )
+
+                                Text(
+                                    text = "Back to Operator Login",
+                                    color = Color(0xFFC084FC),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier
+                                        .clickable { selectedMode = "user_login" }
+                                        .padding(top = 8.dp)
+                                )
+                            }
+
+                            "forgot" -> {
+                                Text(
+                                    text = "Forgot Credentials Link",
+                                    style = TextStyle(
+                                        brush = Brush.linearGradient(
+                                            colors = listOf(Color.White, Color(0xFFC084FC))
+                                        ),
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
+                                Text(
+                                    text = "Lookup User ID or trigger password resets to registered emails:",
+                                    fontSize = 12.sp,
+                                    color = Color(0xB3FFFFFF),
+                                    textAlign = TextAlign.Center
+                                )
+
+                                // Sleek glass choice switcher
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0x0DFFFFFF), RoundedCornerShape(12.dp))
+                                        .border(BorderStroke(1.dp, Color(0x1AFFFFFF)), RoundedCornerShape(12.dp))
+                                        .padding(4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    val isResetSel = forgotRoleSearch == "password"
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(34.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isResetSel) Color(0xFF8B5CF6) else Color.Transparent)
+                                            .clickable { forgotRoleSearch = "password" }
+                                            .testTag("forgot_choice_password"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("Reset Password", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(34.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (!isResetSel) Color(0xFF8B5CF6) else Color.Transparent)
+                                            .clickable { forgotRoleSearch = "id" }
+                                            .testTag("forgot_choice_id"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("Find User ID", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    }
+                                }
+
+                                CyberGlassTextField(
+                                    value = forgotEmail,
+                                    onValueChange = { forgotEmail = it },
+                                    label = "Registered Email Address",
+                                    placeholder = "operator@chemdose.com",
+                                    leadingIcon = Icons.Default.Email,
+                                    testTag = "forgot_email_input"
+                                )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                CyberGradientButton(
+                                    text = if (forgotRoleSearch == "password") "Send Reset Link" else "Query User ID",
+                                    isLoading = isAuthenticating,
+                                    testTag = "forgot_submit_btn",
+                                    onClick = {
+                                        if (forgotEmail.isBlank() || !forgotEmail.contains("@")) {
+                                            Toast.makeText(context, "Please enter a valid email address layout.", Toast.LENGTH_SHORT).show()
+                                            return@CyberGradientButton
+                                        }
+                                        if (forgotRoleSearch == "password") {
+                                            viewModel.sendPasswordReset(forgotEmail.trim()) { success, msg ->
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
+                                        } else {
+                                            viewModel.lookupUserId(forgotEmail.trim()) { success, msg ->
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                )
+
+                                Text(
+                                    text = "Back to Operator Login",
+                                    color = Color(0xFFC084FC),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier
+                                        .clickable { selectedMode = "user_login" }
+                                        .padding(top = 8.dp)
+                                )
+                            }
+                        }
+
+                        // Cyberpunk styled global auth error display
+                        authError?.let { err ->
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Color(0x33EF4444)),
+                                border = BorderStroke(1.dp, Color(0x66EF4444)),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(48.dp)
-                                    .testTag("forgot_submit_btn"),
-                                enabled = !isAuthenticating,
+                                    .testTag("auth_error_card"),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
-                                if (isAuthenticating) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp).testTag("login_spinner"), color = MaterialTheme.colorScheme.onPrimary)
-                                } else {
-                                    Text(if (forgotRoleSearch == "password") "Send Reset Link" else "Query User ID", fontWeight = FontWeight.Bold)
-                                }
+                                Text(
+                                    text = err,
+                                    color = Color(0xFFFCA5A5),
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(12.dp),
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         }
                     }
+            }
 
-                    // Global Auth Error Display
-                    authError?.let { err ->
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("auth_error_card"),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = err,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                fontSize = 11.sp,
-                                modifier = Modifier.padding(10.dp),
-                                textAlign = TextAlign.Center
-                            )
-                        }
+            // Secure & Encrypted footer text
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = Color(0xFF8B5CF6),
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Secure AES-256 Encrypted Connection",
+                    color = Color(0x66FFFFFF),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun GlassmorphicCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Box(
+        modifier = modifier
+            // Ambient neon purple glow around the card
+            .drawBehind {
+                drawRoundRect(
+                    color = Color(0xFFC084FC).copy(alpha = 0.15f),
+                    topLeft = Offset(-3.dp.toPx(), -3.dp.toPx()),
+                    size = Size(size.width + 6.dp.toPx(), size.height + 6.dp.toPx()),
+                    cornerRadius = CornerRadius(26.dp.toPx(), 26.dp.toPx()),
+                    style = Stroke(width = 4.dp.toPx())
+                )
+            }
+            .clip(RoundedCornerShape(26.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0x22FFFFFF), // Semi-transparent white highlight at top
+                        Color(0x0FFFFFFF)  // Lower opacity to blend nicely
+                    )
+                )
+            )
+            .border(
+                BorderStroke(
+                    1.2.dp,
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(0x66FFFFFF),     // Translucent white top left
+                            Color(0x19A78BFA),     // Ambient purple tint
+                            Color(0x19EC4899),     // Ambient pink tint
+                            Color(0x33FFFFFF)      // Soft white bottom right
+                        )
+                    )
+                ),
+                shape = RoundedCornerShape(26.dp)
+            )
+            .padding(horizontal = 20.dp, vertical = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+fun CyberGlassTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    leadingIcon: ImageVector,
+    testTag: String,
+    isPassword: Boolean = false,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    val transition = updateTransition(targetState = isFocused, label = "focus_glow")
+    val borderWidth by transition.animateDp(label = "border_width") { focused -> if (focused) 1.8.dp else 1.dp }
+    val borderBrush = if (isFocused) {
+        Brush.linearGradient(colors = listOf(Color(0xFFC084FC), Color(0xFFF472B6)))
+    } else {
+        Brush.linearGradient(colors = listOf(Color(0x66FFFFFF), Color(0x44FFFFFF)))
+    }
+    val glowAlpha by transition.animateFloat(label = "glow_alpha") { focused -> if (focused) 0.25f else 0f }
+
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = label,
+            color = Color(0xFFC084FC),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+        )
+        
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .drawBehind {
+                    if (glowAlpha > 0f) {
+                        drawRoundRect(
+                            color = Color(0xFFC084FC).copy(alpha = glowAlpha),
+                            topLeft = Offset(-3.dp.toPx(), -3.dp.toPx()),
+                            size = Size(size.width + 6.dp.toPx(), size.height + 6.dp.toPx()),
+                            cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx()),
+                            style = Stroke(width = 3.dp.toPx())
+                        )
+                    }
+                }
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0x26FFFFFF))
+                .border(BorderStroke(borderWidth, borderBrush), RoundedCornerShape(14.dp))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = if (isFocused) Color(0xFFD8B4FE) else Color(0x99FFFFFF),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = placeholder,
+                            color = Color(0x99FFFFFF),
+                            fontSize = 14.sp
+                        )
+                    }
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = value,
+                        onValueChange = onValueChange,
+                        textStyle = TextStyle(
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        singleLine = true,
+                        cursorBrush = Brush.verticalGradient(colors = listOf(Color(0xFFC084FC), Color(0xFFF472B6))),
+                        keyboardOptions = keyboardOptions,
+                        keyboardActions = keyboardActions,
+                        visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { isFocused = it.isFocused }
+                            .testTag(testTag)
+                    )
+                }
+                if (isPassword) {
+                    IconButton(
+                        onClick = { passwordVisible = !passwordVisible }
+                    ) {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = "Toggle Password Visibility",
+                            tint = Color(0x99FFFFFF),
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun CyberGradientButton(
+    text: String,
+    onClick: () -> Unit,
+    isLoading: Boolean,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .drawBehind {
+                // Neon glow shadow effect
+                drawRoundRect(
+                    color = Color(0xFFEC4899).copy(alpha = 0.3f),
+                    topLeft = Offset(-2.dp.toPx(), -2.dp.toPx()),
+                    size = Size(size.width + 4.dp.toPx(), size.height + 4.dp.toPx()),
+                    cornerRadius = CornerRadius(25.dp.toPx(), 25.dp.toPx()),
+                    style = Stroke(width = 4.dp.toPx())
+                )
+            }
+            .clip(RoundedCornerShape(25.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
+                )
+            )
+            .clickable(enabled = !isLoading, onClick = onClick)
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                color = Color.White,
+                modifier = Modifier.size(20.dp).testTag("login_spinner")
+            )
+        } else {
+            Text(
+                text = text,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }

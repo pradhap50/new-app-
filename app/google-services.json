@@ -1,33 +1,33 @@
 {
   "project_info": {
-    "project_number": "47780244743",
-    "project_id": "chemdose-formula",
-    "storage_bucket": "chemdose-formula.firebasestorage.app"
+    "project_number": "395731770468",
+    "project_id": "chemdose",
+    "storage_bucket": "chemdose.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:47780244743:android:8440369b3f9458667d29a2",
+        "mobilesdk_app_id": "1:395731770468:android:dead45f4ef4c7fa4ca1371",
         "android_client_info": {
           "package_name": "com.chemdoseformula.app"
         }
       },
       "oauth_client": [
         {
-          "client_id": "47780244743-c8cu5q81f3s31vrrm0smsaq4kpq0u3e6.apps.googleusercontent.com",
+          "client_id": "395731770468-dstus9lf6c6pqgco9atv690qhj3bdeah.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyC6YQfew7BRCzE7fHyMyh9zPC3EZiMTgSo"
+          "current_key": "AIzaSyD5sUC_5rqRoQrvp41mWslChogiSJ0olQ0"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "47780244743-c8cu5q81f3s31vrrm0smsaq4kpq0u3e6.apps.googleusercontent.com",
+              "client_id": "395731770468-dstus9lf6c6pqgco9atv690qhj3bdeah.apps.googleusercontent.com",
               "client_type": 3
             }
           ]

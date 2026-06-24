@@ -1026,6 +1026,7 @@ class CalculatorViewModel(
             val newVars = variables.map { it.copy(id = 0L, slideId = nextId) }
             
             repository.updateSlideAndVariables(newSlide, newVars)
+            saveNewFormulaToFirestoreDirect(newSlide, newVars)
             _activeSlideId.value = nextId // Swaps selection directly to the newly added slide
             logAction("ADD_SLIDE", "Added brand new slide #$nextId: $title ($formula)")
         }
@@ -1035,6 +1036,7 @@ class CalculatorViewModel(
         viewModelScope.launch {
             createAutoBackup()
             repository.deleteSlide(slideId)
+            deleteFormulaFromFirestoreDirect(slideId)
             logAction("DELETE_SLIDE", "Deleted slide/formula #$slideId from the database.")
             // If the deleted slide was active, switch to another available slide
             if (_activeSlideId.value == slideId) {
@@ -1065,6 +1067,7 @@ class CalculatorViewModel(
             }
             
             repository.updateSlideAndVariables(duplicatedSlide, duplicatedVars)
+            saveNewFormulaToFirestoreDirect(duplicatedSlide, duplicatedVars)
             _activeSlideId.value = nextId // set duplicated slide active!
             logAction("DUPLICATE_SLIDE", "Duplicated slide #$slideId as new slide #$nextId.")
         }
@@ -1091,6 +1094,8 @@ class CalculatorViewModel(
 
             repository.updateSlideAndVariables(newSlide1, varsFor1)
             repository.updateSlideAndVariables(newSlide2, varsFor2)
+            saveNewFormulaToFirestoreDirect(newSlide1, varsFor1)
+            saveNewFormulaToFirestoreDirect(newSlide2, varsFor2)
 
             logAction("REORDER_SLIDE", "Swapped positions of slide $id1 (${slide1.title}) and slide $id2 (${slide2.title})")
             
@@ -1321,9 +1326,9 @@ class CalculatorViewModel(
                     category = category
                 )
                 repository.updateSlide(updatedSlide)
+                saveNewFormulaToFirestoreDirect(updatedSlide, parameters)
                 logAction("EDIT_FORMULA", "Modified formula details of slide #$slideId: $title ($formula)")
                 _formulaSaveStatus.value = FormulaOperationStatus.Success
-                triggerAutoSync()
             } catch (e: Exception) {
                 val errMsg = "Safe database transaction write failed: ${e.message}"
                 logFormulaUpdateError(slideId, title, formula, errMsg, e)
@@ -1376,7 +1381,8 @@ class CalculatorViewModel(
             )
             repository.insertVariable(newVar)
             logAction("EDIT_FORMULA", "Added variable $symbol ($name) to slide #$slideId")
-            triggerAutoSync()
+            kotlinx.coroutines.delay(200)
+            saveFormulaToFirestoreDirect(slideId)
         }
     }
 
@@ -1403,7 +1409,8 @@ class CalculatorViewModel(
             )
             repository.updateVariable(updatedVar)
             logAction("EDIT_FORMULA", "Updated variable specs of $symbol on slide #${variable.slideId}")
-            triggerAutoSync()
+            kotlinx.coroutines.delay(200)
+            saveFormulaToFirestoreDirect(variable.slideId)
         }
     }
 
@@ -1415,7 +1422,11 @@ class CalculatorViewModel(
                 repository.updateVariable(updatedVar)
             }
             logAction("EDIT_FORMULA", "Reordered parameters for slide #${variables.firstOrNull()?.slideId}")
-            triggerAutoSync()
+            val firstSlideId = variables.firstOrNull()?.slideId
+            if (firstSlideId != null) {
+                kotlinx.coroutines.delay(200)
+                saveFormulaToFirestoreDirect(firstSlideId)
+            }
         }
     }
 
@@ -1424,7 +1435,8 @@ class CalculatorViewModel(
             createAutoBackup()
             repository.deleteVariable(variable)
             logAction("EDIT_FORMULA", "Deleted variable ${variable.symbol} from slide #${variable.slideId}")
-            triggerAutoSync()
+            kotlinx.coroutines.delay(200)
+            saveFormulaToFirestoreDirect(variable.slideId)
         }
     }
 
@@ -1890,6 +1902,7 @@ class CalculatorViewModel(
             if (initialized) {
                 _firebaseAuthStatus.value = "Firebase Ready"
                 _syncStatus.value = "Connecting..."
+                startRealtimeFormulaListener()
                 if (_firebaseUserUid.value == null) {
                     signInFirebaseAnonymously { success ->
                         if (success) {
@@ -1939,6 +1952,7 @@ class CalculatorViewModel(
             FirebaseService.testFirestoreConnection(uid) { testSuccess, message ->
                 if (testSuccess) {
                     _syncStatus.value = "Online"
+                    startRealtimeFormulaListener()
                     // On connection success, retry pending Room queues
                     retryPendingUserProfiles()
                     retryPendingUserActivityLogs()
@@ -1996,6 +2010,7 @@ class CalculatorViewModel(
                 _firebaseUserUid.value = uid
                 _firebaseAuthStatus.value = "Authenticated (UID: $uid)"
                 logAction("FIREBASE_AUTH_SUCCESS", "Anonymous session established. UID: $uid")
+                startRealtimeFormulaListener()
                 triggerAutoSync()
                 onComplete?.invoke(true)
             } else {
@@ -2022,6 +2037,7 @@ class CalculatorViewModel(
                     _firebaseUserUid.value = uid
                     _firebaseAuthStatus.value = "Authenticated (Email: $email)"
                     logAction("FIREBASE_AUTH_SUCCESS", "Authenticated via Email. UID: $uid")
+                    startRealtimeFormulaListener()
                     triggerAutoSync()
                 }
             } else {
@@ -2200,6 +2216,302 @@ class CalculatorViewModel(
         }
     }
 
+    private val _formulaCloudUpdateMessage = MutableStateFlow<String?>(null)
+    val formulaCloudUpdateMessage: StateFlow<String?> = _formulaCloudUpdateMessage.asStateFlow()
+
+    fun clearFormulaCloudUpdateMessage() {
+        _formulaCloudUpdateMessage.value = null
+    }
+
+    private var formulaListenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+
+    fun startRealtimeFormulaListener() {
+        val firestore = FirebaseService.getFirestore()
+        if (firestore == null) {
+            Log.w("RealtimeFormula", "Firestore not initialized yet. Cannot start realtime listener.")
+            return
+        }
+
+        // Unregister existing listener if any
+        formulaListenerRegistration?.remove()
+
+        Log.i("RealtimeFormula", "Starting real-time formula synchronization listener...")
+        _syncStatus.value = "Syncing..."
+        
+        formulaListenerRegistration = firestore.collection("formulas")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("RealtimeFormula", "Firestore snapshot listener error", error)
+                    _syncStatus.value = "Sync Error"
+                    return@addSnapshotListener
+                }
+
+                if (snapshot == null) {
+                    _syncStatus.value = "Empty Database"
+                    return@addSnapshotListener
+                }
+
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        val documents = snapshot.documents
+                        if (documents.isEmpty()) {
+                            Log.i("RealtimeFormula", "No formulas found in Firestore. If admin, we should prepopulate cloud.")
+                            _syncStatus.value = "Cloud Empty"
+                            if (_isAdminLoggedIn.value) {
+                                Log.i("RealtimeFormula", "Admin detected and cloud is empty. Initializing cloud formulas with default/local templates...")
+                                uploadAllFormulasToFirestoreQuietly()
+                            }
+                            return@launch
+                        }
+
+                        // Parse formulas from Firestore documents
+                        val firestoreFormulaIds = mutableSetOf<Int>()
+                        var changed = false
+
+                        for (doc in documents) {
+                            val formulaIdStr = doc.id
+                            val formulaId = formulaIdStr.toIntOrNull() ?: continue
+                            firestoreFormulaIds.add(formulaId)
+
+                            val title = doc.getString("title") ?: ""
+                            val category = doc.getString("category") ?: "Custom"
+                            val formulaExpr = doc.getString("formulaExpression") ?: ""
+                            val outputUnit = doc.getString("outputUnit") ?: ""
+                            val description = doc.getString("description") ?: ""
+                            
+                            // Parse variables list
+                            val variablesRaw = doc.get("variables") as? List<Map<String, Any>> ?: emptyList()
+                            val parsedVars = variablesRaw.map { vMap ->
+                                Variable(
+                                    slideId = formulaId,
+                                    symbol = vMap["symbol"] as? String ?: "",
+                                    name = vMap["name"] as? String ?: "",
+                                    value = (vMap["value"] as? Number)?.toDouble() ?: 0.0,
+                                    unit = vMap["unit"] as? String ?: ""
+                                )
+                            }
+
+                            // Compare with local db to see if there is any difference.
+                            val localSlide = repository.getSlideById(formulaId).firstOrNull()
+                            if (localSlide == null || 
+                                localSlide.slide.title != title ||
+                                localSlide.slide.category != category ||
+                                localSlide.slide.formula != formulaExpr ||
+                                localSlide.slide.resultUnit != outputUnit ||
+                                localSlide.slide.description != description ||
+                                localSlide.variables.size != parsedVars.size ||
+                                localSlide.variables.any { lv -> 
+                                    val matching = parsedVars.find { it.symbol == lv.symbol }
+                                    matching == null || matching.name != lv.name || matching.unit != lv.unit
+                                }
+                            ) {
+                                // There is a change! Let's update local DB.
+                                val slideObj = Slide(
+                                    id = formulaId,
+                                    title = title,
+                                    formula = formulaExpr,
+                                    resultUnit = outputUnit,
+                                    description = description,
+                                    category = category
+                                )
+                                repository.updateSlideAndVariables(slideObj, parsedVars)
+                                changed = true
+                            }
+                        }
+
+                        // Delete any local formula that doesn't exist in Firestore
+                        val localSlides = allSlides.value
+                        for (local in localSlides) {
+                            if (!firestoreFormulaIds.contains(local.slide.id)) {
+                                repository.deleteSlide(local.slide.id)
+                                changed = true
+                            }
+                        }
+
+                        _syncStatus.value = "Synced"
+
+                        if (changed) {
+                            if (!_isAdminLoggedIn.value) {
+                                _formulaCloudUpdateMessage.value = "Formula updated from cloud"
+                                showToast("Formula updated from cloud")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("RealtimeFormula", "Error parsing / updating formulas from Firestore snapshot", e)
+                        _syncStatus.value = "Error parsing"
+                    }
+                }
+            }
+    }
+
+    private suspend fun uploadAllFormulasToFirestoreQuietly() {
+        val firestore = FirebaseService.getFirestore() ?: return
+        val localSlides = allSlides.value
+        val batch = firestore.batch()
+        for (swv in localSlides) {
+            val docRef = firestore.collection("formulas").document(swv.slide.id.toString())
+            val docData = mapOf(
+                "formulaId" to swv.slide.id,
+                "title" to swv.slide.title,
+                "category" to swv.slide.category,
+                "inputLabels" to swv.variables.map { it.name },
+                "inputUnits" to swv.variables.map { it.unit },
+                "outputLabel" to swv.slide.title,
+                "outputUnit" to swv.slide.resultUnit,
+                "formulaExpression" to swv.slide.formula,
+                "decimalPrecision" to decimalPlaces.value,
+                "visibilityStatus" to true,
+                "sortOrder" to swv.slide.id,
+                "createdBy" to "admin",
+                "updatedBy" to "admin",
+                "createdAt" to System.currentTimeMillis(),
+                "updatedAt" to System.currentTimeMillis(),
+                "variables" to swv.variables.map { v ->
+                    mapOf(
+                        "symbol" to v.symbol,
+                        "name" to v.name,
+                        "value" to v.value,
+                        "unit" to v.unit
+                    )
+                }
+            )
+            batch.set(docRef, docData)
+        }
+        batch.commit().addOnSuccessListener {
+            Log.i("RealtimeFormula", "Cloud database pre-populated successfully with ${localSlides.size} templates.")
+        }.addOnFailureListener { e ->
+            Log.e("RealtimeFormula", "Failed to pre-populate cloud database", e)
+        }
+    }
+
+    fun saveNewFormulaToFirestoreDirect(slide: Slide, variables: List<Variable>) {
+        if (!_isAdminLoggedIn.value) return
+        val firestore = FirebaseService.getFirestore() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val docRef = firestore.collection("formulas").document(slide.id.toString())
+            val docData = mapOf(
+                "formulaId" to slide.id,
+                "title" to slide.title,
+                "category" to slide.category,
+                "inputLabels" to variables.map { it.name },
+                "inputUnits" to variables.map { it.unit },
+                "outputLabel" to slide.title,
+                "outputUnit" to slide.resultUnit,
+                "formulaExpression" to slide.formula,
+                "decimalPrecision" to decimalPlaces.value,
+                "visibilityStatus" to true,
+                "sortOrder" to slide.id,
+                "createdBy" to "admin",
+                "updatedBy" to "admin",
+                "createdAt" to System.currentTimeMillis(),
+                "updatedAt" to System.currentTimeMillis(),
+                "variables" to variables.map { v ->
+                    mapOf(
+                        "symbol" to v.symbol,
+                        "name" to v.name,
+                        "value" to v.value,
+                        "unit" to v.unit
+                    )
+                }
+            )
+            docRef.set(docData)
+                .addOnSuccessListener {
+                    Log.d("RealtimeFormula", "New Formula #${slide.id} successfully saved to Firestore.")
+                    showToast("Saved to Firebase")
+                    _formulaSaveStatus.value = FormulaOperationStatus.Success
+                }
+                .addOnFailureListener { e ->
+                    Log.e("RealtimeFormula", "Failed to save new formula #${slide.id} to Firestore", e)
+                    _formulaSaveStatus.value = FormulaOperationStatus.Error(e.localizedMessage ?: "Unknown Firestore Error")
+                }
+        }
+    }
+
+    fun saveFormulaToFirestoreDirect(slideId: Int) {
+        if (!_isAdminLoggedIn.value) return
+        val firestore = FirebaseService.getFirestore() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val swv = allSlides.value.find { it.slide.id == slideId } ?: return@launch
+            val docRef = firestore.collection("formulas").document(slideId.toString())
+            val docData = mapOf(
+                "formulaId" to swv.slide.id,
+                "title" to swv.slide.title,
+                "category" to swv.slide.category,
+                "inputLabels" to swv.variables.map { it.name },
+                "inputUnits" to swv.variables.map { it.unit },
+                "outputLabel" to swv.slide.title,
+                "outputUnit" to swv.slide.resultUnit,
+                "formulaExpression" to swv.slide.formula,
+                "decimalPrecision" to decimalPlaces.value,
+                "visibilityStatus" to true,
+                "sortOrder" to swv.slide.id,
+                "createdBy" to "admin",
+                "updatedBy" to "admin",
+                "createdAt" to System.currentTimeMillis(),
+                "updatedAt" to System.currentTimeMillis(),
+                "variables" to swv.variables.map { v ->
+                    mapOf(
+                        "symbol" to v.symbol,
+                        "name" to v.name,
+                        "value" to v.value,
+                        "unit" to v.unit
+                    )
+                }
+            )
+            docRef.set(docData)
+                .addOnSuccessListener {
+                    Log.d("RealtimeFormula", "Formula #$slideId successfully saved to Firestore.")
+                    showToast("Saved to Firebase")
+                    _formulaSaveStatus.value = FormulaOperationStatus.Success
+                }
+                .addOnFailureListener { e ->
+                    Log.e("RealtimeFormula", "Failed to save formula #$slideId to Firestore", e)
+                    _formulaSaveStatus.value = FormulaOperationStatus.Error(e.localizedMessage ?: "Unknown Firestore Error")
+                }
+        }
+    }
+
+    fun deleteFormulaFromFirestoreDirect(slideId: Int) {
+        if (!_isAdminLoggedIn.value) return
+        val firestore = FirebaseService.getFirestore() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            firestore.collection("formulas").document(slideId.toString())
+                .delete()
+                .addOnSuccessListener {
+                    Log.d("RealtimeFormula", "Formula #$slideId successfully deleted from Firestore.")
+                    showToast("Saved to Firebase")
+                }
+                .addOnFailureListener { e ->
+                    Log.e("RealtimeFormula", "Failed to delete formula #$slideId from Firestore", e)
+                }
+        }
+    }
+
+    fun resetFirestoreFormulasToDefaults() {
+        if (!_isAdminLoggedIn.value) return
+        val firestore = FirebaseService.getFirestore() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            firestore.collection("formulas").get()
+                .addOnSuccessListener { snapshot ->
+                    val batch = firestore.batch()
+                    for (doc in snapshot.documents) {
+                        batch.delete(doc.reference)
+                    }
+                    batch.commit().addOnSuccessListener {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            uploadAllFormulasToFirestoreQuietly()
+                        }
+                        showToast("Saved to Firebase")
+                    }
+                }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        formulaListenerRegistration?.remove()
+    }
+
     fun logCurrentCalculationToFirestore(slideTitle: String, formula: String, inputs: String, result: String) {
         val uid = _firebaseUserUid.value
         val config = _firebaseConfig.value
@@ -2241,6 +2553,7 @@ class CalculatorViewModel(
             if (initialized) {
                 _firebaseAuthStatus.value = "Firebase Connected"
                 _syncStatus.value = "Connecting..."
+                startRealtimeFormulaListener()
                 // Only sign in anonymously if no actual user is logged in
                 if (!_isUserLoggedIn.value && !_isAdminLoggedIn.value) {
                     signInFirebaseAnonymously { success ->
