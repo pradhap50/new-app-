@@ -629,6 +629,30 @@ object FirebaseService {
             }
     }
 
+    fun getDatabaseUrl(customUrl: String): String {
+        if (customUrl.isNotEmpty()) return customUrl
+        return try {
+            val app = FirebaseApp.getInstance()
+            val projectId = app.options.projectId
+            if (!projectId.isNullOrEmpty()) {
+                "https://$projectId-default-rtdb.firebaseio.com/"
+            } else {
+                ""
+            }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun getDatabaseInstance(databaseUrl: String): FirebaseDatabase {
+        val resolved = getDatabaseUrl(databaseUrl)
+        return if (resolved.isNotEmpty()) {
+            FirebaseDatabase.getInstance(resolved)
+        } else {
+            FirebaseDatabase.getInstance()
+        }
+    }
+
     /**
      * Store customized formulas list to Realtime Database under user scope.
      */
@@ -640,11 +664,7 @@ object FirebaseService {
         onComplete: (Boolean, String) -> Unit
     ) {
         try {
-            val database = if (databaseUrl.isNotEmpty()) {
-                FirebaseDatabase.getInstance(databaseUrl)
-            } else {
-                FirebaseDatabase.getInstance()
-            }
+            val database = getDatabaseInstance(databaseUrl)
             val userRef = database.getReference("users").child(userId)
             
             val settingsMap = mapOf(
@@ -698,11 +718,7 @@ object FirebaseService {
         onComplete: (Boolean, List<NetworkFormula>?, Int?, String) -> Unit
     ) {
         try {
-            val database = if (databaseUrl.isNotEmpty()) {
-                FirebaseDatabase.getInstance(databaseUrl)
-            } else {
-                FirebaseDatabase.getInstance()
-            }
+            val database = getDatabaseInstance(databaseUrl)
             val userRef = database.getReference("users").child(userId).child("data")
             
             userRef.get().addOnSuccessListener { dataSnap ->
@@ -775,11 +791,7 @@ object FirebaseService {
         result: String
     ) {
         try {
-            val database = if (databaseUrl.isNotEmpty()) {
-                FirebaseDatabase.getInstance(databaseUrl)
-            } else {
-                FirebaseDatabase.getInstance()
-            }
+            val database = getDatabaseInstance(databaseUrl)
             val historyMap = mapOf(
                 "timestamp" to java.text.DateFormat.getDateTimeInstance().format(java.util.Date()),
                 "formulaTitle" to slideTitle,

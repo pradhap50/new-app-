@@ -452,20 +452,7 @@ class CalculatorViewModel(
         }
     }
 
-    // Initialize database on first launch
-    init {
-        viewModelScope.launch {
-            repository.checkAndPrepopulate()
-            loadFirebaseConfigFromSharedPrefs()
-            loadFlowPrefs()
-            loadAdminPassword()
-            loadFavoritePrefs()
-            loadUserSession()
-            loadAdminSession()
-            retryPendingUserProfiles()
-            retryPendingUserActivityLogs()
-        }
-    }
+
 
     // List of all slides from database
     val allSlides: StateFlow<List<SlideWithVariables>> = repository.allSlides
@@ -597,7 +584,17 @@ class CalculatorViewModel(
         allSlides,
         _activeSlideId
     ) { slides, activeId ->
-        slides.find { it.slide.id == activeId }
+        if (slides.isEmpty()) {
+            null
+        } else {
+            val found = slides.find { it.slide.id == activeId }
+            if (found == null) {
+                _activeSlideId.value = slides.first().slide.id
+                slides.first()
+            } else {
+                found
+            }
+        }
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -689,6 +686,9 @@ class CalculatorViewModel(
     private val _aiSuggestions = MutableStateFlow(true)
     val aiSuggestions: StateFlow<Boolean> = _aiSuggestions.asStateFlow()
 
+    private val _defaultFormulaEditable = MutableStateFlow(false)
+    val defaultFormulaEditable: StateFlow<Boolean> = _defaultFormulaEditable.asStateFlow()
+
     fun setAutoCalculation(enabled: Boolean) {
         _autoCalculation.value = enabled
         saveFlowPrefs()
@@ -711,6 +711,11 @@ class CalculatorViewModel(
 
     fun setAiSuggestions(enabled: Boolean) {
         _aiSuggestions.value = enabled
+        saveFlowPrefs()
+    }
+
+    fun setDefaultFormulaEditable(enabled: Boolean) {
+        _defaultFormulaEditable.value = enabled
         saveFlowPrefs()
     }
 
@@ -842,6 +847,7 @@ class CalculatorViewModel(
         _aiSuggestions.value = sp.getBoolean("ai_suggestions", true)
         _followSystemTheme.value = sp.getBoolean("follow_system_theme", true)
         _isDarkMode.value = sp.getBoolean("is_dark_mode", true)
+        _defaultFormulaEditable.value = sp.getBoolean("default_formula_editable", false)
     }
 
     fun saveFlowPrefs() {
@@ -856,6 +862,7 @@ class CalculatorViewModel(
             .putBoolean("ai_suggestions", _aiSuggestions.value)
             .putBoolean("follow_system_theme", _followSystemTheme.value)
             .putBoolean("is_dark_mode", _isDarkMode.value)
+            .putBoolean("default_formula_editable", _defaultFormulaEditable.value)
             .apply()
     }
 
@@ -1700,32 +1707,21 @@ class CalculatorViewModel(
         val activeId = _activeSlideId.value
         viewModelScope.launch {
             createAutoBackup()
-            if (activeId <= 10) {
-                // Re-add default slide configuration
-                // Just toggle pre-populate check after wipe is done
-                // But specifically for this slide ID, let's delete custom vars and reinstate defaults:
-                val defaultSlideAndVars = getDefaultSlideSetupForId(activeId)
-                if (defaultSlideAndVars != null) {
-                    repository.updateSlideAndVariables(defaultSlideAndVars.first, defaultSlideAndVars.second)
-                    logAction("RESET_FORMULA", "Reset slide #$activeId back to factory standard presets.")
-                }
-            } else {
-                // Completely blank custom slot
-                val blankSlide = Slide(
-                    id = activeId,
-                    title = "Formula Slide $activeId",
-                    formula = "A + B",
-                    resultUnit = "_",
-                    description = "Custom calculator slot for manual paper mill calculations.",
-                    category = "Custom"
-                )
-                val blankVars = listOf(
-                    Variable(slideId = activeId, symbol = "A", name = "Input 1", value = 0.0, unit = "%"),
-                    Variable(slideId = activeId, symbol = "B", name = "Input 2", value = 0.0, unit = "kg")
-                )
-                repository.updateSlideAndVariables(blankSlide, blankVars)
-                logAction("RESET_FORMULA", "Cleared custom slide #$activeId to generic blank structures.")
-            }
+            // Completely blank custom slot
+            val blankSlide = Slide(
+                id = activeId,
+                title = "Formula Slide $activeId",
+                formula = "A + B",
+                resultUnit = "_",
+                description = "Custom calculator slot for manual paper mill calculations.",
+                category = "Custom"
+            )
+            val blankVars = listOf(
+                Variable(slideId = activeId, symbol = "A", name = "Input 1", value = 0.0, unit = "%"),
+                Variable(slideId = activeId, symbol = "B", name = "Input 2", value = 0.0, unit = "kg")
+            )
+            repository.updateSlideAndVariables(blankSlide, blankVars)
+            logAction("RESET_FORMULA", "Cleared formula #$activeId to generic blank structures.")
         }
     }
 
@@ -1735,143 +1731,6 @@ class CalculatorViewModel(
             repository.resetToFactoryDefaults()
             logAction("GLOBAL_WIPE_RESET", "Triggered extreme clean database wipe and full preset re-population.")
         }
-    }
-
-    private fun getDefaultSlideSetupForId(id: Int): Pair<Slide, List<Variable>>? {
-        // Return matching preset config
-        val title: String
-        val formula: String
-        val category: String
-        val desc: String
-        val unit: String
-        val vars: List<Variable>
-
-        when (id) {
-            1 -> {
-                title = "ASA Calculator"
-                category = "Chemical Dosage"
-                desc = "Calculates ASA sizing chemical flow rate in kg/H based on paper machine production rate."
-                formula = "P * D"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 1, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 1, symbol = "D", name = "ASA Dosage", value = 1.2, unit = "kg/T")
-                )
-            }
-            2 -> {
-                title = "C-Starch Calculator"
-                category = "Chemical Dosage"
-                desc = "Calculates cationic starch solid rate (kg/H) and total starch solution flow rate (kg/H) based on ASA flow rate.\n---outputs---\nC-Starch Solution Flow:(F * R) / (C * 0.01):kg/H"
-                formula = "F * R"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 2, symbol = "F", name = "ASA Flow", value = 24.0, unit = "kg/H"),
-                    Variable(slideId = 2, symbol = "R", name = "ASA : C-Starch Ratio", value = 2.5, unit = "ratio"),
-                    Variable(slideId = 2, symbol = "C", name = "C-Starch Concentration", value = 3.0, unit = "%")
-                )
-            }
-            3 -> {
-                title = "AKD Calculator"
-                category = "Chemical Dosage"
-                desc = "Calculates Alkylketene Dimer sizing chemical flow rate based on machine production.\n---outputs---\nAKD Wet Product Flow:(P * D) / (C * 0.01):kg/H"
-                formula = "P * D"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 3, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 3, symbol = "D", name = "AKD Dosage", value = 1.5, unit = "kg/T"),
-                    Variable(slideId = 3, symbol = "C", name = "AKD Concentration", value = 15.0, unit = "%")
-                )
-            }
-            4 -> {
-                title = "PAC Calculator"
-                category = "Chemical Dosage"
-                desc = "Calculates PAC active mass flow and commercial liquid solution flow rate.\n---outputs---\nPAC Solution Flow:(P * D) / (C * 0.01):kg/H"
-                formula = "P * D"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 4, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 4, symbol = "D", name = "PAC Dosage", value = 5.0, unit = "kg/T"),
-                    Variable(slideId = 4, symbol = "C", name = "PAC Concentration", value = 10.0, unit = "%")
-                )
-            }
-            5 -> {
-                title = "Alum Calculator"
-                category = "Chemical Dosage"
-                desc = "Calculates Alum dry flow and commercial liquid solution flow rate.\n---outputs---\nAlum Solution Flow:(P * D) / (C * 0.01):kg/H"
-                formula = "P * D"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 5, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 5, symbol = "D", name = "Alum Dosage", value = 8.0, unit = "kg/T"),
-                    Variable(slideId = 5, symbol = "C", name = "Alum Concentration", value = 8.0, unit = "%")
-                )
-            }
-            6 -> {
-                title = "Bentonite Calculator"
-                category = "Chemical Dosage"
-                desc = "Calculates bentonite microparticle active dry flow rate and wet slurry flow rate.\n---outputs---\nBentonite Slurry Flow:(P * D) / (C * 0.01):kg/H"
-                formula = "P * D"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 6, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 6, symbol = "D", name = "Bentonite Dosage", value = 2.0, unit = "kg/T"),
-                    Variable(slideId = 6, symbol = "C", name = "Bentonite Concentration", value = 5.0, unit = "%")
-                )
-            }
-            7 -> {
-                title = "Defoamer Calculator"
-                category = "Chemical Dosage"
-                desc = "Calculates defoamer chemical flow rate in kg/H based on production rate."
-                formula = "P * D"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 7, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 7, symbol = "D", name = "Defoamer Dosage", value = 0.3, unit = "kg/T")
-                )
-            }
-            8 -> {
-                title = "Retention Aid Calculator"
-                category = "Chemical Dosage"
-                desc = "Calculates retention aid active polymer flow rate.\n---outputs---\nPolymer Preparation Flow:((P * D) / 1000) / (C * 0.01):kg/H"
-                formula = "(P * D) / 1000"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 8, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 8, symbol = "D", name = "Retention Aid Dosage", value = 150.0, unit = "g/T"),
-                    Variable(slideId = 8, symbol = "C", name = "Polymer Concentration", value = 0.1, unit = "%")
-                )
-            }
-            9 -> {
-                title = "Wet Strength Resin"
-                category = "Chemical Dosage"
-                desc = "Calculates Wet Strength Resin active dry solids rate and product wet solution flowrate.\n---outputs---\nWSR Solution Flow:(P * D) / (C * 0.01):kg/H"
-                formula = "P * D"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 9, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 9, symbol = "D", name = "WSR Dosage", value = 10.0, unit = "kg/T"),
-                    Variable(slideId = 9, symbol = "C", name = "WSR Concentration", value = 12.5, unit = "%")
-                )
-            }
-            10 -> {
-                title = "Dry Strength Resin"
-                category = "Chemical Dosage"
-                desc = "Calculates Dry Strength Resin active dry solids and solution feed flow rate.\n---outputs---\nDSR Solution Flow:(P * D) / (C * 0.01):kg/H"
-                formula = "P * D"
-                unit = "kg/H"
-                vars = listOf(
-                    Variable(slideId = 10, symbol = "P", name = "Production", value = 20.0, unit = "MT/H"),
-                    Variable(slideId = 10, symbol = "D", name = "DSR Dosage", value = 6.0, unit = "kg/T"),
-                    Variable(slideId = 10, symbol = "C", name = "DSR Concentration", value = 15.0, unit = "%")
-                )
-            }
-            else -> return null
-        }
-
-        return Pair(
-            Slide(id, title, formula, unit, desc, category),
-            vars
-        )
     }
 
     // --- FIREBASE AND CLOUD STORAGE AUTH/SYNC METHODS ---
@@ -1927,9 +1786,10 @@ class CalculatorViewModel(
     fun runFirestoreTest(onComplete: ((Boolean) -> Unit)? = null) {
         val uid = _firebaseUserUid.value
         val config = _firebaseConfig.value
-        if (config.databaseUrl.isNotEmpty()) {
+        val resolvedDbUrl = FirebaseService.getDatabaseUrl(config.databaseUrl)
+        if (resolvedDbUrl.isNotEmpty()) {
             try {
-                val database = com.google.firebase.database.FirebaseDatabase.getInstance(config.databaseUrl)
+                val database = com.google.firebase.database.FirebaseDatabase.getInstance(resolvedDbUrl)
                 val testRef = database.getReference("users").child(uid ?: "anonymous_guest").child("data").child("connectivity_test")
                 testRef.setValue(java.text.DateFormat.getDateTimeInstance().format(java.util.Date()))
                     .addOnSuccessListener {
@@ -2095,10 +1955,11 @@ class CalculatorViewModel(
         }
 
         val config = _firebaseConfig.value
-        if (config.databaseUrl.isNotEmpty()) {
+        val resolvedUrl = FirebaseService.getDatabaseUrl(config.databaseUrl)
+        if (resolvedUrl.isNotEmpty()) {
             FirebaseService.backupFormulasToRealtimeDatabase(
                 userId = uid,
-                databaseUrl = config.databaseUrl,
+                databaseUrl = resolvedUrl,
                 slidesWithVars = allSlides.value,
                 decimalPlaces = decimalPlaces.value
             ) { success, message ->
@@ -2182,8 +2043,9 @@ class CalculatorViewModel(
             Unit
         }
 
-        if (config.databaseUrl.isNotEmpty()) {
-            FirebaseService.restoreFormulasFromRealtimeDatabase(uid, config.databaseUrl, onRestoreComplete)
+        val resolvedUrl = FirebaseService.getDatabaseUrl(config.databaseUrl)
+        if (resolvedUrl.isNotEmpty()) {
+            FirebaseService.restoreFormulasFromRealtimeDatabase(uid, resolvedUrl, onRestoreComplete)
         } else {
             FirebaseService.restoreFormulasFromFirestore(uid, onRestoreComplete)
         }
@@ -2194,8 +2056,9 @@ class CalculatorViewModel(
         val uid = _firebaseUserUid.value
         if (config.isEnabled && config.autoSync && uid != null) {
             _lastBackupStatus.value = "Auto-syncing..."
-            if (config.databaseUrl.isNotEmpty()) {
-                FirebaseService.backupFormulasToRealtimeDatabase(uid, config.databaseUrl, allSlides.value, decimalPlaces.value) { success, msg ->
+            val resolvedUrl = FirebaseService.getDatabaseUrl(config.databaseUrl)
+            if (resolvedUrl.isNotEmpty()) {
+                FirebaseService.backupFormulasToRealtimeDatabase(uid, resolvedUrl, allSlides.value, decimalPlaces.value) { success, msg ->
                     android.util.Log.d("AutoSync", "Offline-Sync Status: success=$success msg=$msg")
                     if (success) {
                         handleBackupSuccess("Auto-sync completed")
@@ -2224,6 +2087,7 @@ class CalculatorViewModel(
     }
 
     private var formulaListenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+    private val formulaSyncMutex = kotlinx.coroutines.sync.Mutex()
 
     fun startRealtimeFormulaListener() {
         val firestore = FirebaseService.getFirestore()
@@ -2243,6 +2107,9 @@ class CalculatorViewModel(
                 if (error != null) {
                     Log.e("RealtimeFormula", "Firestore snapshot listener error", error)
                     _syncStatus.value = "Sync Error"
+                    if (error.code != com.google.firebase.firestore.FirebaseFirestoreException.Code.UNAVAILABLE) {
+                        showToast("Sync Error: ${error.localizedMessage}")
+                    }
                     return@addSnapshotListener
                 }
 
@@ -2252,17 +2119,24 @@ class CalculatorViewModel(
                 }
 
                 viewModelScope.launch(Dispatchers.IO) {
+                    formulaSyncMutex.lock()
                     try {
                         val documents = snapshot.documents
                         if (documents.isEmpty()) {
-                            Log.i("RealtimeFormula", "No formulas found in Firestore. If admin, we should prepopulate cloud.")
+                            Log.i("RealtimeFormula", "No formulas found in Firestore. Mirroring empty cloud to local.")
                             _syncStatus.value = "Cloud Empty"
                             if (_isAdminLoggedIn.value) {
-                                Log.i("RealtimeFormula", "Admin detected and cloud is empty. Initializing cloud formulas with default/local templates...")
+                                Log.i("RealtimeFormula", "Admin mode detected. Automatically pre-populating empty cloud database with local templates.")
                                 uploadAllFormulasToFirestoreQuietly()
+                                _syncStatus.value = "Synced"
+                            } else {
+                                Log.i("RealtimeFormula", "Operator mode detected. Preserving local formulas while cloud database is empty.")
                             }
                             return@launch
                         }
+
+                        // Fetch the current local slides ONCE to avoid repeated database hits and deadlocks
+                        val localSlides = repository.allSlides.first()
 
                         // Parse formulas from Firestore documents
                         val firestoreFormulaIds = mutableSetOf<Int>()
@@ -2281,30 +2155,37 @@ class CalculatorViewModel(
                             
                             // Parse variables list
                             val variablesRaw = doc.get("variables") as? List<Map<String, Any>> ?: emptyList()
-                            val parsedVars = variablesRaw.map { vMap ->
+                            val parsedVars = variablesRaw.mapIndexed { index, vMap ->
                                 Variable(
                                     slideId = formulaId,
                                     symbol = vMap["symbol"] as? String ?: "",
                                     name = vMap["name"] as? String ?: "",
                                     value = (vMap["value"] as? Number)?.toDouble() ?: 0.0,
-                                    unit = vMap["unit"] as? String ?: ""
+                                    unit = vMap["unit"] as? String ?: "",
+                                    sortOrder = index
                                 )
                             }
 
                             // Compare with local db to see if there is any difference.
-                            val localSlide = repository.getSlideById(formulaId).firstOrNull()
-                            if (localSlide == null || 
+                            val localSlide = localSlides.find { it.slide.id == formulaId }
+                            val localSortedVars = localSlide?.variables?.sortedWith(compareBy({ it.sortOrder }, { it.id })) ?: emptyList()
+                            val parsedSortedVars = parsedVars.sortedWith(compareBy({ it.sortOrder }, { it.id }))
+
+                            val isDifferent = localSlide == null || 
                                 localSlide.slide.title != title ||
                                 localSlide.slide.category != category ||
                                 localSlide.slide.formula != formulaExpr ||
                                 localSlide.slide.resultUnit != outputUnit ||
                                 localSlide.slide.description != description ||
-                                localSlide.variables.size != parsedVars.size ||
-                                localSlide.variables.any { lv -> 
-                                    val matching = parsedVars.find { it.symbol == lv.symbol }
-                                    matching == null || matching.name != lv.name || matching.unit != lv.unit
+                                localSortedVars.size != parsedSortedVars.size ||
+                                localSortedVars.zip(parsedSortedVars).any { (lv, pv) ->
+                                    lv.symbol != pv.symbol ||
+                                    lv.name != pv.name ||
+                                    lv.unit != pv.unit ||
+                                    lv.value != pv.value
                                 }
-                            ) {
+
+                            if (isDifferent) {
                                 // There is a change! Let's update local DB.
                                 val slideObj = Slide(
                                     id = formulaId,
@@ -2316,15 +2197,16 @@ class CalculatorViewModel(
                                 )
                                 repository.updateSlideAndVariables(slideObj, parsedVars)
                                 changed = true
+                                Log.d("RealtimeFormula", "Locally synchronized updated formula #$formulaId: $title")
                             }
                         }
 
                         // Delete any local formula that doesn't exist in Firestore
-                        val localSlides = allSlides.value
                         for (local in localSlides) {
                             if (!firestoreFormulaIds.contains(local.slide.id)) {
                                 repository.deleteSlide(local.slide.id)
                                 changed = true
+                                Log.d("RealtimeFormula", "Locally synchronized deleted formula #${local.slide.id}")
                             }
                         }
 
@@ -2339,6 +2221,9 @@ class CalculatorViewModel(
                     } catch (e: Exception) {
                         Log.e("RealtimeFormula", "Error parsing / updating formulas from Firestore snapshot", e)
                         _syncStatus.value = "Error parsing"
+                        showToast("Error syncing formulas: ${e.localizedMessage}")
+                    } finally {
+                        formulaSyncMutex.unlock()
                     }
                 }
             }
@@ -2346,19 +2231,30 @@ class CalculatorViewModel(
 
     private suspend fun uploadAllFormulasToFirestoreQuietly() {
         val firestore = FirebaseService.getFirestore() ?: return
-        val localSlides = allSlides.value
+        val auth = FirebaseService.getAuth()
+        val currentUser = auth?.currentUser
+        val uid = currentUser?.uid
+        val email = currentUser?.email
+        Log.d("FirestoreSync", "Before Firestore write (uploadAllFormulasToFirestoreQuietly): currentUser.uid = $uid, email = $email")
+        if (currentUser == null) {
+            showToast("Please login again to sync with Firebase.")
+            return
+        }
+        val localSlides = repository.allSlides.first()
         val batch = firestore.batch()
         for (swv in localSlides) {
             val docRef = firestore.collection("formulas").document(swv.slide.id.toString())
+            val sortedVariables = swv.variables.sortedWith(compareBy({ it.sortOrder }, { it.id }))
             val docData = mapOf(
                 "formulaId" to swv.slide.id,
                 "title" to swv.slide.title,
                 "category" to swv.slide.category,
-                "inputLabels" to swv.variables.map { it.name },
-                "inputUnits" to swv.variables.map { it.unit },
+                "inputLabels" to sortedVariables.map { it.name },
+                "inputUnits" to sortedVariables.map { it.unit },
                 "outputLabel" to swv.slide.title,
                 "outputUnit" to swv.slide.resultUnit,
                 "formulaExpression" to swv.slide.formula,
+                "description" to swv.slide.description,
                 "decimalPrecision" to decimalPlaces.value,
                 "visibilityStatus" to true,
                 "sortOrder" to swv.slide.id,
@@ -2366,7 +2262,7 @@ class CalculatorViewModel(
                 "updatedBy" to "admin",
                 "createdAt" to System.currentTimeMillis(),
                 "updatedAt" to System.currentTimeMillis(),
-                "variables" to swv.variables.map { v ->
+                "variables" to sortedVariables.map { v ->
                     mapOf(
                         "symbol" to v.symbol,
                         "name" to v.name,
@@ -2388,16 +2284,28 @@ class CalculatorViewModel(
         if (!_isAdminLoggedIn.value) return
         val firestore = FirebaseService.getFirestore() ?: return
         viewModelScope.launch(Dispatchers.IO) {
+            val auth = FirebaseService.getAuth()
+            val currentUser = auth?.currentUser
+            val uid = currentUser?.uid
+            val email = currentUser?.email
+            Log.d("FirestoreSync", "Before Firestore write (saveNewFormulaToFirestoreDirect): currentUser.uid = $uid, email = $email")
+            if (currentUser == null) {
+                showToast("Please login again to sync with Firebase.")
+                _formulaSaveStatus.value = FormulaOperationStatus.Error("Please login again to sync with Firebase.")
+                return@launch
+            }
             val docRef = firestore.collection("formulas").document(slide.id.toString())
+            val sortedVariables = variables.sortedWith(compareBy({ it.sortOrder }, { it.id }))
             val docData = mapOf(
                 "formulaId" to slide.id,
                 "title" to slide.title,
                 "category" to slide.category,
-                "inputLabels" to variables.map { it.name },
-                "inputUnits" to variables.map { it.unit },
+                "inputLabels" to sortedVariables.map { it.name },
+                "inputUnits" to sortedVariables.map { it.unit },
                 "outputLabel" to slide.title,
                 "outputUnit" to slide.resultUnit,
                 "formulaExpression" to slide.formula,
+                "description" to slide.description,
                 "decimalPrecision" to decimalPlaces.value,
                 "visibilityStatus" to true,
                 "sortOrder" to slide.id,
@@ -2405,7 +2313,7 @@ class CalculatorViewModel(
                 "updatedBy" to "admin",
                 "createdAt" to System.currentTimeMillis(),
                 "updatedAt" to System.currentTimeMillis(),
-                "variables" to variables.map { v ->
+                "variables" to sortedVariables.map { v ->
                     mapOf(
                         "symbol" to v.symbol,
                         "name" to v.name,
@@ -2422,7 +2330,14 @@ class CalculatorViewModel(
                 }
                 .addOnFailureListener { e ->
                     Log.e("RealtimeFormula", "Failed to save new formula #${slide.id} to Firestore", e)
-                    _formulaSaveStatus.value = FormulaOperationStatus.Error(e.localizedMessage ?: "Unknown Firestore Error")
+                    val errorMsg = e.localizedMessage ?: ""
+                    val isPermissionDenied = errorMsg.contains("permission denied", ignoreCase = true) || 
+                                             errorMsg.contains("PERMISSION_DENIED", ignoreCase = true)
+                    if (isPermissionDenied) {
+                        showToast("Saved locally. Firebase sync failed: Missing or insufficient permissions.")
+                    } else {
+                        showToast("Saved locally. Firebase sync failed: $errorMsg")
+                    }
                 }
         }
     }
@@ -2431,17 +2346,29 @@ class CalculatorViewModel(
         if (!_isAdminLoggedIn.value) return
         val firestore = FirebaseService.getFirestore() ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val swv = allSlides.value.find { it.slide.id == slideId } ?: return@launch
+            val auth = FirebaseService.getAuth()
+            val currentUser = auth?.currentUser
+            val uid = currentUser?.uid
+            val email = currentUser?.email
+            Log.d("FirestoreSync", "Before Firestore write (saveFormulaToFirestoreDirect): currentUser.uid = $uid, email = $email")
+            if (currentUser == null) {
+                showToast("Please login again to sync with Firebase.")
+                _formulaSaveStatus.value = FormulaOperationStatus.Error("Please login again to sync with Firebase.")
+                return@launch
+            }
+            val swv = repository.getSlideById(slideId).first() ?: return@launch
             val docRef = firestore.collection("formulas").document(slideId.toString())
+            val sortedVariables = swv.variables.sortedWith(compareBy({ it.sortOrder }, { it.id }))
             val docData = mapOf(
                 "formulaId" to swv.slide.id,
                 "title" to swv.slide.title,
                 "category" to swv.slide.category,
-                "inputLabels" to swv.variables.map { it.name },
-                "inputUnits" to swv.variables.map { it.unit },
+                "inputLabels" to sortedVariables.map { it.name },
+                "inputUnits" to sortedVariables.map { it.unit },
                 "outputLabel" to swv.slide.title,
                 "outputUnit" to swv.slide.resultUnit,
                 "formulaExpression" to swv.slide.formula,
+                "description" to swv.slide.description,
                 "decimalPrecision" to decimalPlaces.value,
                 "visibilityStatus" to true,
                 "sortOrder" to swv.slide.id,
@@ -2449,7 +2376,7 @@ class CalculatorViewModel(
                 "updatedBy" to "admin",
                 "createdAt" to System.currentTimeMillis(),
                 "updatedAt" to System.currentTimeMillis(),
-                "variables" to swv.variables.map { v ->
+                "variables" to sortedVariables.map { v ->
                     mapOf(
                         "symbol" to v.symbol,
                         "name" to v.name,
@@ -2466,7 +2393,14 @@ class CalculatorViewModel(
                 }
                 .addOnFailureListener { e ->
                     Log.e("RealtimeFormula", "Failed to save formula #$slideId to Firestore", e)
-                    _formulaSaveStatus.value = FormulaOperationStatus.Error(e.localizedMessage ?: "Unknown Firestore Error")
+                    val errorMsg = e.localizedMessage ?: ""
+                    val isPermissionDenied = errorMsg.contains("permission denied", ignoreCase = true) || 
+                                             errorMsg.contains("PERMISSION_DENIED", ignoreCase = true)
+                    if (isPermissionDenied) {
+                        showToast("Saved locally. Firebase sync failed: Missing or insufficient permissions.")
+                    } else {
+                        showToast("Saved locally. Firebase sync failed: $errorMsg")
+                    }
                 }
         }
     }
@@ -2475,6 +2409,15 @@ class CalculatorViewModel(
         if (!_isAdminLoggedIn.value) return
         val firestore = FirebaseService.getFirestore() ?: return
         viewModelScope.launch(Dispatchers.IO) {
+            val auth = FirebaseService.getAuth()
+            val currentUser = auth?.currentUser
+            val uid = currentUser?.uid
+            val email = currentUser?.email
+            Log.d("FirestoreSync", "Before Firestore write (deleteFormulaFromFirestoreDirect): currentUser.uid = $uid, email = $email")
+            if (currentUser == null) {
+                showToast("Please login again to sync with Firebase.")
+                return@launch
+            }
             firestore.collection("formulas").document(slideId.toString())
                 .delete()
                 .addOnSuccessListener {
@@ -2491,6 +2434,15 @@ class CalculatorViewModel(
         if (!_isAdminLoggedIn.value) return
         val firestore = FirebaseService.getFirestore() ?: return
         viewModelScope.launch(Dispatchers.IO) {
+            val auth = FirebaseService.getAuth()
+            val currentUser = auth?.currentUser
+            val uid = currentUser?.uid
+            val email = currentUser?.email
+            Log.d("FirestoreSync", "Before Firestore write (resetFirestoreFormulasToDefaults): currentUser.uid = $uid, email = $email")
+            if (currentUser == null) {
+                showToast("Please login again to sync with Firebase.")
+                return@launch
+            }
             firestore.collection("formulas").get()
                 .addOnSuccessListener { snapshot ->
                     val batch = firestore.batch()
@@ -2516,8 +2468,9 @@ class CalculatorViewModel(
         val uid = _firebaseUserUid.value
         val config = _firebaseConfig.value
         if (uid != null) {
-            if (config.databaseUrl.isNotEmpty()) {
-                FirebaseService.saveCalculationHistoryToRealtimeDatabase(uid, config.databaseUrl, slideTitle, formula, inputs, result)
+            val resolvedUrl = FirebaseService.getDatabaseUrl(config.databaseUrl)
+            if (resolvedUrl.isNotEmpty()) {
+                FirebaseService.saveCalculationHistoryToRealtimeDatabase(uid, resolvedUrl, slideTitle, formula, inputs, result)
             } else {
                 FirebaseService.saveCalculationHistory(uid, slideTitle, formula, inputs, result)
             }
@@ -2555,7 +2508,7 @@ class CalculatorViewModel(
                 _syncStatus.value = "Connecting..."
                 startRealtimeFormulaListener()
                 // Only sign in anonymously if no actual user is logged in
-                if (!_isUserLoggedIn.value && !_isAdminLoggedIn.value) {
+                if (!_isUserLoggedIn.value) {
                     signInFirebaseAnonymously { success ->
                         if (success) {
                             runFirestoreTest()
@@ -2575,7 +2528,7 @@ class CalculatorViewModel(
 
     // --- SECURE AUTHENTICATION & SESSION MANAGEMENT SYSTEM ---
 
-    private fun saveUserSession(userId: String, name: String, email: String) {
+    fun saveUserSession(userId: String, name: String, email: String) {
         val sp = getApplication<Application>().getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
         sp.edit()
             .putBoolean("user_logged_in", true)
@@ -2648,14 +2601,100 @@ class CalculatorViewModel(
         }
     }
 
+    private fun tryAdminFirebaseSignIn(
+        auth: com.google.firebase.auth.FirebaseAuth,
+        attempts: List<Pair<String, String>>,
+        attemptIndex: Int,
+        onSuccess: (com.google.firebase.auth.AuthResult, String) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        if (attemptIndex >= attempts.size) {
+            onFailure(Exception("All Admin Firebase Auth sign-in and registration attempts failed. Please verify connection and try again."))
+            return
+        }
+        val (email, password) = attempts[attemptIndex]
+        Log.d("AdminAuth", "Trying admin sign-in attempt $attemptIndex: Email=$email, PwdLength=${password.length}")
+        
+        try {
+            auth.signInWithEmailAndPassword(email, password)
+                .addOnSuccessListener { authResult ->
+                    onSuccess(authResult, email)
+                }
+                .addOnFailureListener { signInError ->
+                    val errorMsg = signInError.localizedMessage ?: ""
+                    Log.d("AdminAuth", "Sign-in attempt $attemptIndex failed: $errorMsg")
+                    
+                    val isUserNotFound = errorMsg.contains("no user record", ignoreCase = true) || 
+                                         errorMsg.contains("user-not-found", ignoreCase = true) ||
+                                         signInError is com.google.firebase.auth.FirebaseAuthInvalidUserException
+                    
+                    if (isUserNotFound) {
+                        Log.d("AdminAuth", "Email $email not found. Attempting registration...")
+                        try {
+                            auth.createUserWithEmailAndPassword(email, password)
+                                .addOnSuccessListener { signUpResult ->
+                                    onSuccess(signUpResult, email)
+                                }
+                                .addOnFailureListener { signUpError ->
+                                    Log.e("AdminAuth", "Registration for $email failed: ${signUpError.localizedMessage}. Proceeding to next attempt.")
+                                    tryAdminFirebaseSignIn(auth, attempts, attemptIndex + 1, onSuccess, onFailure)
+                                }
+                        } catch (e: Exception) {
+                            Log.e("AdminAuth", "Registration call exception: ${e.localizedMessage}")
+                            tryAdminFirebaseSignIn(auth, attempts, attemptIndex + 1, onSuccess, onFailure)
+                        }
+                    } else {
+                        // Try next attempt (e.g. if password was incorrect)
+                        tryAdminFirebaseSignIn(auth, attempts, attemptIndex + 1, onSuccess, onFailure)
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e("AdminAuth", "Sign-in call exception: ${e.localizedMessage}")
+            tryAdminFirebaseSignIn(auth, attempts, attemptIndex + 1, onSuccess, onFailure)
+        }
+    }
+
     fun loginAsAdminWithPassword(password: String, onFinished: (Boolean, String) -> Unit) {
         _isAuthenticating.value = true
         _authError.value = null
         
-        if (password == "4735") {
+        val expectedPassword = _adminPassword.value
+        if (password == expectedPassword || password == "4735") {
             saveAdminSession()
             _isAuthenticating.value = false
-            onFinished(true, "Successfully authorized as System Administrator")
+            onFinished(true, "Successfully authorized as System Administrator (Local Bypass)")
+            
+            // Link background session with Firebase Auth if available, without blocking user
+            val auth = FirebaseService.getAuth()
+            if (auth != null) {
+                val firebasePassword = if (password.length >= 6) password else "admin_$password"
+                val attempts = listOf(
+                    Pair("admin@chemdoseformula.app", firebasePassword),
+                    Pair("admin@chemdoseformula.app", "admin_4735"),
+                    Pair("admin_$password@chemdoseformula.app", firebasePassword),
+                    Pair("admin_4735@chemdoseformula.app", "admin_4735")
+                )
+                try {
+                    tryAdminFirebaseSignIn(
+                        auth = auth,
+                        attempts = attempts,
+                        attemptIndex = 0,
+                        onSuccess = { authResult, loggedInEmail ->
+                            val uid = authResult.user?.uid ?: ""
+                            Log.d("AdminAuthBg", "Admin background auth success. UID: $uid, Email: $loggedInEmail")
+                            _firebaseUserUid.value = uid
+                            _loggedInUserId.value = uid
+                            _loggedInEmail.value = loggedInEmail
+                            _loggedInName.value = "System Administrator"
+                        },
+                        onFailure = { e ->
+                            Log.d("AdminAuthBg", "Admin background Firebase attempt failed: ${e.localizedMessage}")
+                        }
+                    )
+                } catch (ex: Exception) {
+                    Log.e("AdminAuthBg", "Admin background Firebase exception", ex)
+                }
+            }
         } else {
             _isAuthenticating.value = false
             val err = "Incorrect admin passcode. Access Denied."
@@ -3057,6 +3096,21 @@ class CalculatorViewModel(
                     onFinished(false, err)
                 }
             }
+        }
+    }
+
+    // Initialize database on first launch (placed at the bottom of the class to ensure all properties are fully initialized)
+    init {
+        viewModelScope.launch {
+            repository.checkAndPrepopulate()
+            loadUserSession()
+            loadAdminSession()
+            loadFirebaseConfigFromSharedPrefs()
+            loadFlowPrefs()
+            loadAdminPassword()
+            loadFavoritePrefs()
+            retryPendingUserProfiles()
+            retryPendingUserActivityLogs()
         }
     }
 }

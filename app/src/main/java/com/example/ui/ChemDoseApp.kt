@@ -119,6 +119,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
     val adminPassword by viewModel.adminPassword.collectAsStateWithLifecycle()
 
     val autoCalculation by viewModel.autoCalculation.collectAsStateWithLifecycle()
+    val defaultFormulaEditable by viewModel.defaultFormulaEditable.collectAsStateWithLifecycle()
     val fontScale by viewModel.fontScale.collectAsStateWithLifecycle()
     val openaiApiKey by viewModel.openaiApiKey.collectAsStateWithLifecycle()
     val enableAiCalculations by viewModel.enableAiCalculations.collectAsStateWithLifecycle()
@@ -138,6 +139,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
     var showSlidesSearchDialog by remember { mutableStateOf(false) }
     var showBackupRestoreDialog by remember { mutableStateOf(false) }
     var showEditSlideMetaDialog by remember { mutableStateOf(false) }
+    var showDeleteFormulaConfirmDialog by remember { mutableStateOf<Int?>(null) }
     var showAddVarDialog by remember { mutableStateOf(false) }
     var showEditVarSpecsDialog by remember { mutableStateOf<Variable?>(null) }
     var variableToDelete by remember { mutableStateOf<Variable?>(null) }
@@ -281,43 +283,43 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
         }
     }
 
-    // Material 3 Color Schemes - Premium slate navy / industrial dark branding
+    // Material 3 Color Schemes - Upgraded with beautiful lavender, neon pink, and periwinkle
     val darkColorScheme = darkColorScheme(
-        primary = Color(0xFF3B82F6),
-        secondary = Color(0xFF22C55E),
-        tertiary = Color(0xFFF59E0B),
-        background = Color(0xFF090A0F),     // Near Black
-        surface = Color(0xFF1E293B),        // Dark Blue/Grey
-        surfaceVariant = Color(0xFF334155),
-        onPrimary = Color.White,
-        onSecondary = Color.White,
-        onTertiary = Color.White,
-        onBackground = Color(0xFFFFFFFF),   // White
-        onSurface = Color(0xFFFFFFFF),      // White
-        primaryContainer = Color(0xFF1E3A8A),
-        onPrimaryContainer = Color(0xFFEFF6FF),
-        outline = Color(0xFF475569),
-        outlineVariant = Color(0xFF334155),
-        error = Color(0xFFEF4444),
+        primary = Color(0xFFA78BFA),        // Soft radiant violet/lavender
+        secondary = Color(0xFFF472B6),      // Vivid neon pink
+        tertiary = Color(0xFF38BDF8),       // Translucent sky blue
+        background = Color(0xFF090A1A),     // Near-black slate with deep purple hint
+        surface = Color(0xFF12132D),        // Deep glass-covered violet surface
+        surfaceVariant = Color(0xFF1E1F42), // Indigo-gray variant
+        onPrimary = Color(0xFF090A1A),      // Dark contrast
+        onSecondary = Color(0xFF090A1A),
+        onTertiary = Color(0xFF090A1A),
+        onBackground = Color(0xFFFFFFFF),   // High-contrast pure white text
+        onSurface = Color(0xFFFFFFFF),
+        primaryContainer = Color(0xFF2E1065), // Rich violet container
+        onPrimaryContainer = Color(0xFFF5F3FF),
+        outline = Color(0xFF4C1D95),
+        outlineVariant = Color(0xFF1E1B4B),
+        error = Color(0xFFF87171),
         onError = Color.White
     )
 
     val lightColorScheme = lightColorScheme(
-        primary = Color(0xFF2563EB),
-        secondary = Color(0xFF16A34A),
-        tertiary = Color(0xFFD97706),
-        background = Color(0xFFFFFFFF),     // White
-        surface = Color(0xFFF1F5F9),        // Light Grey
-        surfaceVariant = Color(0xFFE2E8F0),
+        primary = Color(0xFF7C3AED),        // Deep rich violet
+        secondary = Color(0xFFDB2777),      // Vibrant rich pink
+        tertiary = Color(0xFF0284C7),       // Sky-blue periwinkle accent
+        background = Color(0xFFF8FAFC),     // Pearl lavender white
+        surface = Color(0xFFFFFFFF),        // Clean white
+        surfaceVariant = Color(0xFFEEF2F6), // Light slate gray
         onPrimary = Color.White,
         onSecondary = Color.White,
         onTertiary = Color.White,
-        onBackground = Color(0xFF0F172A),   // Black Text
-        onSurface = Color(0xFF0F172A),      // Black Text
-        primaryContainer = Color(0xFFDBEAFE),
-        onPrimaryContainer = Color(0xFF1E40AF),
-        outline = Color(0xFF94A3B8),
-        outlineVariant = Color(0xFFE2E8F0),
+        onBackground = Color(0xFF0F172A),   // Slate black text
+        onSurface = Color(0xFF0F172A),
+        primaryContainer = Color(0xFFEDE9FE), // Soft purple highlight container
+        onPrimaryContainer = Color(0xFF5B21B6),
+        outline = Color(0xFFDDD6FE),
+        outlineVariant = Color(0xFFF3E8FF),
         error = Color(0xFFDC2626),
         onError = Color.White
     )
@@ -330,6 +332,24 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
         extraLarge = RoundedCornerShape(24.dp)
     )
 
+    val mainBgBrush = if (isDarkMode) {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF070814), // Deep outer space dark
+                Color(0xFF0F1026), // Periwinkle-infused dark violet
+                Color(0xFF0A0B1A)  // Smooth gradient bottom transition
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFFF3E8FF), // Pastel lavender rose
+                Color(0xFFE0E7FF), // Soft sky-blue periwinkle
+                Color(0xFFF8FAFC)  // White sand slate
+            )
+        )
+    }
+
     MaterialTheme(
         colorScheme = if (isDarkMode) darkColorScheme else lightColorScheme,
         shapes = customShapes
@@ -337,7 +357,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(mainBgBrush)
                 .pointerInput(Unit) {
                     awaitPointerEventScope {
                         while (true) {
@@ -352,7 +372,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                     modifier = Modifier
                         .fillMaxSize()
                         .zIndex(200f)
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(mainBgBrush)
                 ) {
                     LoginSelectionScreen(viewModel)
                 }
@@ -637,8 +657,9 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                 )
             },
             bottomBar = {
-                // Bottom controls: Previous, Search / Slide Overview, Next
-                BottomAppBar(
+                if (allSlidesCount.isNotEmpty()) {
+                    // Bottom controls: Previous, Search / Slide Overview, Next
+                    BottomAppBar(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     containerColor = MaterialTheme.colorScheme.surface,
                     tonalElevation = 8.dp
@@ -708,7 +729,8 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                         }
                     }
                 }
-            },
+            }
+        },
             floatingActionButton = {
                 if (isAdminMode) {
                     FloatingActionButton(
@@ -933,15 +955,40 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                     }
 
                     // SWITCH CONTENT DISPLAY ACCORDING TO THE SELECTED TAB STATE
-                    when (activeDashboardTab) {
+                    Crossfade(
+                        targetState = activeDashboardTab,
+                        modifier = Modifier.fillMaxSize(),
+                        label = "tab_crossfade"
+                    ) { targetTab ->
+                        when (targetTab) {
                         "Calculator" -> {
-                            activeSlideOpt?.let { currentSlide ->
+                            if (allSlidesCount.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize().padding(32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text("📋", fontSize = 48.sp, modifier = Modifier.padding(bottom = 16.dp))
+                                        Text(
+                                            text = "No formulas available. Please contact your administrator.",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            textAlign = TextAlign.Center,
+                                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                }
+                            } else {
+                                activeSlideOpt?.let { currentSlide ->
                                 val vars = currentSlide.variables.associate { it.symbol to it.value }
                                 val displayResultValue = FormulaEvaluator.evaluate(currentSlide.slide.formula, vars)
                                 val displayResultUnit = currentSlide.slide.resultUnit
                                 val displayActiveFormula = currentSlide.slide.formula
                                 val displayDetails = currentSlide.slide.description
-                                val isDosingSlide = false
+                                val isDosingSlide = currentSlide.slide.category == "Chemical Dosage" || currentSlide.slide.id in listOf(1, 2, 3, 4, 10)
 
                                 if (isDosingSlide) {
                                     Column(
@@ -1007,53 +1054,6 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                                         lineHeight = 15.sp
                                                     )
-                                                }
-                                            }
-                                        }
-
-                                        // 2. Calculation Mode Card
-                                        Card(
-                                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                                        ) {
-                                            Column(modifier = Modifier.padding(12.dp)) {
-                                                Text(
-                                                    text = "SELECT CALCULATION TARGET",
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    letterSpacing = 1.sp
-                                                )
-                                                Spacer(modifier = Modifier.height(8.dp))
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                ) {
-                                                    val modes = listOf("Flow", "Dosage", "Production", "GPL")
-                                                    modes.forEach { mode ->
-                                                        val isSelected = activeCalculationMode == mode
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .weight(1f)
-                                                                .height(36.dp)
-                                                                .clip(RoundedCornerShape(8.dp))
-                                                                .background(
-                                                                    if (isSelected) MaterialTheme.colorScheme.primary
-                                                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                                                                )
-                                                                .clickable { activeCalculationMode = mode }
-                                                                .testTag("calc_mode_$mode"),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Text(
-                                                                text = mode,
-                                                                fontSize = 11.sp,
-                                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-                                                            )
-                                                        }
-                                                    }
                                                 }
                                             }
                                         }
@@ -1362,24 +1362,52 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                         modifier = Modifier.weight(1f)
                                                     )
                                                     
-                                                    if (isAdminMode) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        if (isAdminMode || defaultFormulaEditable) {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                modifier = Modifier
+                                                                    .clip(RoundedCornerShape(8.dp))
+                                                                    .clickable { showEditSlideMetaDialog = true }
+                                                                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f))
+                                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.Edit,
+                                                                    contentDescription = "Edit Formula",
+                                                                   tint = formulaCardLabel,
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                                Spacer(modifier = Modifier.width(4.dp))
+                                                                Text(
+                                                                    text = "Edit",
+                                                                    fontSize = 11.sp,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    color = formulaCardLabel
+                                                                )
+                                                            }
+                                                        }
+
                                                         Row(
                                                             verticalAlignment = Alignment.CenterVertically,
                                                             modifier = Modifier
                                                                 .clip(RoundedCornerShape(8.dp))
-                                                                .clickable { showEditSlideMetaDialog = true }
-                                                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f))
+                                                                .clickable { showFormulaDetailDialog = true }
+                                                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.1f))
                                                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                                                         ) {
                                                             Icon(
-                                                                imageVector = Icons.Default.Edit,
-                                                                contentDescription = "Edit Formula",
-                                                               tint = formulaCardLabel,
+                                                                imageVector = Icons.Default.Info,
+                                                                contentDescription = "Preview Equation",
+                                                                tint = formulaCardLabel,
                                                                 modifier = Modifier.size(16.dp)
                                                             )
                                                             Spacer(modifier = Modifier.width(4.dp))
                                                             Text(
-                                                                text = "Edit",
+                                                                text = "Equation Info",
                                                                 fontSize = 11.sp,
                                                                 fontWeight = FontWeight.Bold,
                                                                 color = formulaCardLabel
@@ -1568,7 +1596,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                      }
                                                  }
 
-                                                 if (false) {
+                                                 if (isAdminMode || defaultFormulaEditable) {
                                                      Spacer(modifier = Modifier.height(4.dp))
                                                      Row(
                                                     modifier = Modifier.fillMaxWidth(),
@@ -1587,9 +1615,9 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                          verticalAlignment = Alignment.CenterVertically,
                                                          modifier = Modifier
                                                              .clip(RoundedCornerShape(8.dp))
-                                                             .clickable(enabled = isAdminMode) { showEditSlideMetaDialog = true }
-                                                             .background(if (isAdminMode) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f) else Color.Transparent)
-                                                             .padding(horizontal = if (isAdminMode) 8.dp else 0.dp, vertical = if (isAdminMode) 4.dp else 0.dp)
+                                                             .clickable(enabled = isAdminMode || defaultFormulaEditable) { showEditSlideMetaDialog = true }
+                                                             .background(if (isAdminMode || defaultFormulaEditable) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f) else Color.Transparent)
+                                                             .padding(horizontal = if (isAdminMode || defaultFormulaEditable) 8.dp else 0.dp, vertical = if (isAdminMode || defaultFormulaEditable) 4.dp else 0.dp)
                                                      ) {
                                                          Icon(
                                                              imageVector = Icons.Default.Edit,
@@ -1599,7 +1627,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                          )
                                                          Spacer(modifier = Modifier.width(4.dp))
                                                          Text(
-                                                             text = if (isAdminMode) "Edit Formula Details" else "",
+                                                             text = if (isAdminMode || defaultFormulaEditable) "Edit Formula Details" else "",
                                                              fontSize = 11.sp,
                                                              fontWeight = FontWeight.Bold,
                                                              color = MaterialTheme.colorScheme.primary
@@ -1717,6 +1745,8 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                              }
                                          }
 
+
+
                                         val sortedVariables = remember(currentSlide.variables) {
                                             currentSlide.variables.sortedWith(compareBy({ it.sortOrder }, { it.id }))
                                         }
@@ -1812,6 +1842,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator()
                                 }
+                            }
                             }
                         }
                         
@@ -3570,6 +3601,40 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                 checked = autoCalculation,
                                                 onCheckedChange = { viewModel.setAutoCalculation(it) },
                                                 modifier = Modifier.size(48.dp).testTag("auto_calc_switch")
+                                            )
+                                        }
+                                    }
+
+                                    // DEFAULT FORMULAS EDITABLE TOGGLE
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    NeumorphicCard(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        cornerRadius = 16.dp
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp).fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                                Text(
+                                                    text = "Default Formulas Editable", 
+                                                    fontWeight = FontWeight.SemiBold, 
+                                                    fontSize = 24.sp,
+                                                    color = Color(0xFF0F172A)
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = "Allow editing of built-in preset equations and default formulas", 
+                                                    fontSize = 18.sp, 
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color(0xFF334155)
+                                                )
+                                            }
+                                            Switch(
+                                                checked = defaultFormulaEditable,
+                                                onCheckedChange = { viewModel.setDefaultFormulaEditable(it) },
+                                                modifier = Modifier.size(48.dp).testTag("default_formula_editable_switch")
                                             )
                                         }
                                     }
@@ -5591,7 +5656,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
         // Slide Metadata Editing dialog (Title, Formula, Unit, description editing)
         activeSlideOpt?.let { currentSlide ->
             if (showEditSlideMetaDialog) {
-                val isBuiltIn = currentSlide.slide.id <= 10 && !isAdminMode
+                val isBuiltIn = currentSlide.slide.id <= 10 && !isAdminMode && !defaultFormulaEditable
                 
                 var editTitle by remember { mutableStateOf(currentSlide.slide.title) }
                 var editFormula by remember { mutableStateOf(currentSlide.slide.formula) }
@@ -6811,8 +6876,8 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
                                                                 Spacer(modifier = Modifier.width(4.dp))
                                                                 IconButton(
                                                                     onClick = {
-                                                                        viewModel.deleteSlide(slideWithVars.slide.id)
-                                                                        Toast.makeText(context, "Formula deleted successfully!", Toast.LENGTH_SHORT).show()
+                                                                        showDeleteFormulaConfirmDialog = slideWithVars.slide.id
+                                                                        /* Toast will be shown after confirmation */
                                                                     },
                                                                     modifier = Modifier.size(28.dp).testTag("delete_slide_${slideWithVars.slide.id}")
                                                                 ) {
@@ -7186,6 +7251,29 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
             )
         }
 
+        showDeleteFormulaConfirmDialog?.let { slideIdToDelete ->
+            AlertDialog(
+                onDismissRequest = { showDeleteFormulaConfirmDialog = null },
+                title = { Text("Delete Formula?", fontWeight = FontWeight.Bold) },
+                text = { Text("Are you sure you want to permanently delete this formula? This action will permanently remove it from both your local database and the cloud database (Firebase Firestore) for all devices.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.deleteSlide(slideIdToDelete)
+                            showDeleteFormulaConfirmDialog = null
+                        }
+                    ) {
+                        Text("DELETE", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteFormulaConfirmDialog = null }) {
+                        Text("CANCEL")
+                    }
+                }
+            )
+        }
+
         if (showClearAllHistoryDialog) {
             AlertDialog(
                 onDismissRequest = { showClearAllHistoryDialog = false },
@@ -7211,6 +7299,7 @@ fun ChemDoseApp(viewModel: CalculatorViewModel) {
         }
         }
     }
+}
 }
 
 /**
@@ -7510,52 +7599,84 @@ fun NeumorphicCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    val baseBg = if (containerColor == Color.Unspecified) MaterialTheme.colorScheme.surface else containerColor
     val isDark = MaterialTheme.colorScheme.background == Color(0xFF090A0F)
-    val shadowDark = if (isDark) Color(0xFF020617).copy(alpha = 0.6f) else Color(0xFF9E9E9E).copy(alpha = 0.25f)
-    val shadowLight = if (isDark) Color(0xFF334155).copy(alpha = 0.15f) else Color(0xFFFFFFFF).copy(alpha = 0.9f)
     
+    // Glassmorphic translucent background brush
+    val bgBrush = if (containerColor != Color.Unspecified) {
+        Brush.verticalGradient(
+            colors = listOf(
+                containerColor.copy(alpha = 0.9f),
+                containerColor.copy(alpha = 0.7f)
+            )
+        )
+    } else if (isDark) {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0x3D1E293B), // Translucent dark slate
+                Color(0x240F172A)
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xE6FFFFFF), // Pure white translucent glass
+                Color(0xB3F1F5F9)  // Periwinkle-white bottom highlight
+            )
+        )
+    }
+
+    // Gorgeous vibrant gradient borders matching the video elements (violet, pink, rose, sky blue)
+    val borderBrush = if (isDark) {
+        Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF8B5CF6).copy(alpha = 0.65f), // Lavender purple
+                Color(0xFFEC4899).copy(alpha = 0.65f), // Rose pink
+                Color(0xFF3B82F6).copy(alpha = 0.65f)  // Ocean blue
+            )
+        )
+    } else {
+        Brush.linearGradient(
+            colors = listOf(
+                Color(0xFFA78BFA).copy(alpha = 0.85f), // Soft violet
+                Color(0xFFF472B6).copy(alpha = 0.85f), // Soft pink
+                Color(0xFF60A5FA).copy(alpha = 0.85f)  // Pastel sky blue
+            )
+        )
+    }
+
     Box(
         modifier = modifier
             .padding(6.dp)
-    ) {
-        // Dark shadow (Bottom-Right)
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .offset(4.dp, 4.dp)
-                .background(shadowDark, RoundedCornerShape(cornerRadius))
-        )
-        // Light shadow (Top-Left)
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .offset((-4).dp, (-4).dp)
-                .background(shadowLight, RoundedCornerShape(cornerRadius))
-        )
-        // Main Surface with subtle border and optional click trigger
-        Box(
-            modifier = Modifier
-                .background(baseBg, RoundedCornerShape(cornerRadius))
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(cornerRadius)
+            .drawBehind {
+                // Outer neon glow shadow
+                drawRoundRect(
+                    color = if (isDark) Color(0xFF8B5CF6).copy(alpha = 0.16f) else Color(0xFFA78BFA).copy(alpha = 0.12f),
+                    topLeft = Offset(-2.dp.toPx(), -2.dp.toPx()),
+                    size = Size(size.width + 4.dp.toPx(), size.height + 4.dp.toPx()),
+                    cornerRadius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx()),
+                    style = Stroke(width = 3.dp.toPx())
                 )
-                .then(
-                    if (onClick != null) {
-                        Modifier.clickable { onClick() }
-                    } else Modifier
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                content()
             }
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(bgBrush)
+            .border(
+                width = 1.2.dp,
+                brush = borderBrush,
+                shape = RoundedCornerShape(cornerRadius)
+            )
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable { onClick() }
+                } else Modifier
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            content()
         }
     }
 }
@@ -7570,43 +7691,68 @@ fun NeumorphicButton(
     enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit
 ) {
-    val baseContainerColor = if (containerColor == Color.Unspecified) MaterialTheme.colorScheme.surface else containerColor
-    val baseContentColor = if (contentColor == Color.Unspecified) MaterialTheme.colorScheme.onSurface else contentColor
-    
     val isDark = MaterialTheme.colorScheme.background == Color(0xFF090A0F)
-    val shadowDark = if (isDark) Color(0xFF020617).copy(alpha = 0.6f) else Color(0xFF9E9E9E).copy(alpha = if (enabled) 0.25f else 0.05f)
-    val shadowLight = if (isDark) Color(0xFF334155).copy(alpha = 0.15f) else Color(0xFFFFFFFF).copy(alpha = if (enabled) 0.9f else 0.3f)
+    
+    // High-contrast, glowing gradient action button that matches the beautiful social icons in the video
+    val bgBrush = if (containerColor != Color.Unspecified) {
+        Brush.horizontalGradient(colors = listOf(containerColor, containerColor))
+    } else {
+        if (isDark) {
+            if (enabled) {
+                Brush.horizontalGradient(
+                    colors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
+                )
+            } else {
+                Brush.horizontalGradient(
+                    colors = listOf(Color(0xFF475569), Color(0xFF334155))
+                )
+            }
+        } else {
+            if (enabled) {
+                Brush.horizontalGradient(
+                    colors = listOf(Color(0xFF7C3AED), Color(0xFFDB2777))
+                )
+            } else {
+                Brush.horizontalGradient(
+                    colors = listOf(Color(0xFFCBD5E1), Color(0xFF94A3B8))
+                )
+            }
+        }
+    }
+
+    val contentCol = if (contentColor != Color.Unspecified) {
+        if (enabled) contentColor else contentColor.copy(alpha = 0.5f)
+    } else {
+        if (enabled) Color.White else Color.White.copy(alpha = 0.5f)
+    }
 
     Box(
         modifier = modifier
-            .padding(6.dp)
+            .padding(4.dp)
+            .drawBehind {
+                if (enabled) {
+                    // Outer high-intensity glowing frame matching the following/subscribed indicators
+                    drawRoundRect(
+                        color = if (isDark) Color(0xFFEC4899).copy(alpha = 0.28f) else Color(0xFFDB2777).copy(alpha = 0.22f),
+                        topLeft = Offset(-2.dp.toPx(), -2.dp.toPx()),
+                        size = Size(size.width + 4.dp.toPx(), size.height + 4.dp.toPx()),
+                        cornerRadius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx()),
+                        style = Stroke(width = 3.dp.toPx())
+                    )
+                }
+            }
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(bgBrush)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 16.dp),
+        contentAlignment = Alignment.Center
     ) {
-        // Dark shadow (Bottom-Right)
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .offset(3.dp, 3.dp)
-                .background(shadowDark, RoundedCornerShape(cornerRadius))
-        )
-        // Light shadow (Top-Left)
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .offset((-3).dp, (-3).dp)
-                .background(shadowLight, RoundedCornerShape(cornerRadius))
-        )
-        // Main button touch area
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(if (enabled) baseContainerColor else baseContainerColor.copy(alpha = 0.5f), RoundedCornerShape(cornerRadius))
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (enabled) 0.5f else 0.2f), RoundedCornerShape(cornerRadius))
-                .clickable(enabled = enabled) { onClick() }
-                .padding(vertical = 12.dp, horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            CompositionLocalProvider(LocalContentColor provides if (enabled) baseContentColor else baseContentColor.copy(alpha = 0.4f)) {
+            CompositionLocalProvider(LocalContentColor provides contentCol) {
                 content()
             }
         }
@@ -8326,6 +8472,18 @@ fun LoginSelectionScreen(viewModel: CalculatorViewModel) {
                                     }
                                 )
 
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        viewModel.saveUserSession("sandbox_operator", "Demo Operator", "sandbox@chemdose.com")
+                                        Toast.makeText(context, "Instant Operator Bypass Successful!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.fillMaxWidth().testTag("sandbox_operator_bypass_btn")
+                                ) {
+                                    Text("⚡ Instant Operator Bypass (Skip Sign-In)", color = Color(0xFFEC4899), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+
                                 Row(
                                     modifier = Modifier.padding(top = 8.dp),
                                     horizontalArrangement = Arrangement.Center,
@@ -8479,6 +8637,18 @@ fun LoginSelectionScreen(viewModel: CalculatorViewModel) {
                                         }
                                     }
                                 )
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        viewModel.saveAdminSession()
+                                        Toast.makeText(context, "Instant Admin Bypass Successful!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.fillMaxWidth().testTag("sandbox_admin_bypass_btn")
+                                ) {
+                                    Text("⚡ Instant Admin Bypass (Skip Sign-On)", color = Color(0xFFFCA5A5), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
 
                                 Text(
                                     text = "Back to Operator Login",
